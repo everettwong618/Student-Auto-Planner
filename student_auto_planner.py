@@ -1,0 +1,1223 @@
+from __future__ import annotations
+
+import calendar
+import datetime as dt
+import html
+import json
+import re
+import urllib.parse
+from dataclasses import asdict, dataclass
+
+import pandas as pd
+import streamlit as st
+
+try:
+    from supabase import create_client
+except ImportError:  # guest mode still works without auth installed
+    create_client = None
+
+
+st.set_page_config(page_title="Auto-Planner", page_icon="AP", layout="wide")
+
+TODAY = dt.date.today()
+DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+TODAY_IDX = TODAY.weekday()
+DAY_START, DAY_END = 8.0, 22.0
+FOCUS_BLOCK = 1.5
+BREAK = 0.25
+HORIZON_DAYS = 30
+CALENDAR_MONTHS = 12
+
+BRAND = "#01696f"
+ACCENT = "#4157c8"
+SURFACE = "#f7f6f2"
+SECONDARY = "#edeae5"
+TEXT = "#28251d"
+DANGER = "#d94b4b"
+AMBER = "#b7791f"
+SUCCESS = "#2f855a"
+COLORS = [BRAND, ACCENT, AMBER, DANGER, "#7c5cff", SUCCESS]
+KIND_COLORS = {"class": BRAND, "work": TEXT, "club": "#7c5cff", "meal": SUCCESS}
+KIND_LABELS = {"class": "Class", "work": "Work", "club": "Club", "meal": "Meal"}
+STATUSES = ["Not Started", "In Progress", "Done"]
+PAGES = ["Dashboard", "Schedule", "Calendar", "Assignments", "Import", "Study Plan", "Reminders", "Progress", "Account"]
+DEFAULT_MEALS = [(8.0, 8.5, "Breakfast"), (12.0, 13.0, "Lunch"), (18.0, 19.0, "Dinner")]
+
+
+@dataclass
+class Fixed:
+    day: str
+    start: float
+    end: float
+    title: str
+    kind: str
+
+
+@dataclass
+class Assignment:
+    id: int
+    title: str
+    course: str
+    due: dt.date
+    hours: float
+    diff: int
+    color: str
+    weight: int = 3
+    status: str = "Not Started"
+
+
+@dataclass
+class Task:
+    id: int
+    assign_id: int
+    title: str
+    course: str
+    color: str
+    hours: float
+    due: dt.date
+    order: int
+    done: bool = False
+
+
+@dataclass
+class Block:
+    day: str
+    start: float
+    end: float
+    title: str
+    course: str
+    color: str
+    task_id: int
+    date: dt.date
+
+
+def inject_ui() -> None:
+    st.html(
+        """
+        <script>
+        const head = window.parent.document.head;
+        function meta(name, content) {
+          let el = head.querySelector(`meta[name="${name}"]`);
+          if (!el) { el = window.parent.document.createElement("meta"); el.setAttribute("name", name); head.appendChild(el); }
+          el.setAttribute("content", content);
+        }
+        function link(rel, href, attrs = {}) {
+          let el = head.querySelector(`link[rel="${rel}"]`);
+          if (!el) { el = window.parent.document.createElement("link"); el.setAttribute("rel", rel); head.appendChild(el); }
+          el.setAttribute("href", href);
+          Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v));
+        }
+        meta("theme-color", "#01696f");
+        meta("mobile-web-app-capable", "yes");
+        meta("apple-mobile-web-app-capable", "yes");
+        meta("apple-mobile-web-app-title", "Auto-Planner");
+        meta("apple-mobile-web-app-status-bar-style", "default");
+        link("manifest", "/app/static/manifest.webmanifest");
+        link("icon", "/app/static/icon-192.png", {type: "image/png"});
+        link("apple-touch-icon", "/app/static/icon-180.png");
+        </script>
+        """,
+        unsafe_allow_javascript=True,
+    )
+    st.markdown(
+        """
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+        <style>
+        html, body, [class*="css"], .stApp {font-family:"Inter", system-ui, -apple-system, "Segoe UI", sans-serif;}
+        .stApp {background:#f7f6f2;color:#28251d;}
+        .block-container {padding-top:1.15rem; max-width:1080px;}
+        h1,h2,h3 {letter-spacing:0;font-weight:800;color:#28251d;}
+        .hero {background:linear-gradient(145deg,#01696f,#4157c8);color:white;border-radius:14px;padding:20px;margin-bottom:14px;box-shadow:0 12px 28px rgba(1,105,111,.22);}
+        .hero .k {font-size:13px;font-weight:700;opacity:.88;text-transform:uppercase;}
+        .hero .b {font-size:30px;font-weight:800;line-height:1.05;margin:4px 0;}
+        .hero .s {font-size:13px;opacity:.94;}
+        .card {background:white;border:1px solid rgba(40,37,29,.08);border-radius:12px;padding:16px 18px;margin:10px 0;box-shadow:0 6px 18px rgba(40,37,29,.07);}
+        .pill {display:inline-block;border-radius:999px;padding:4px 10px;font-size:11px;font-weight:800;line-height:1.1;white-space:nowrap;}
+        .hi {background:#fde8e8;color:#d94b4b;} .med {background:#fff4db;color:#b7791f;} .lo {background:#e7f4ee;color:#2f855a;}
+        .status-not {background:#eeeae2;color:#655f51;} .status-progress {background:#e4eef8;color:#01696f;} .status-done {background:#e7f4ee;color:#2f855a;}
+        .muted {color:#5f5a4d;} .faint {color:#837d70;font-size:12px;}
+        .danger-banner {background:#fff1f1;border:1px solid rgba(217,75,75,.32);border-left:6px solid #d94b4b;border-radius:12px;padding:14px 16px;margin:12px 0;box-shadow:0 6px 18px rgba(217,75,75,.08);}
+        .empty-note {background:#fbfaf7;border:1px dashed rgba(40,37,29,.18);border-radius:12px;padding:16px;margin:10px 0;color:#5f5a4d;}
+        .stButton>button, .stDownloadButton>button, .stForm button, [role="tab"] {min-height:44px;border-radius:10px;}
+        input, textarea, select {font-size:16px !important;}
+        .stProgress > div > div > div {background:#01696f;}
+        @media (max-width: 700px) {
+          .block-container {padding-left:.7rem;padding-right:.7rem;padding-top:.8rem;}
+          section[data-testid="stSidebar"] {width:88vw !important;min-width:88vw !important;}
+          .hero {padding:16px;border-radius:12px;}
+          .hero .b {font-size:24px;}
+          .card {padding:13px 14px;}
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+inject_ui()
+
+
+def fmt_time(h: float) -> str:
+    hr = int(h)
+    minute = round((h - hr) * 60)
+    ap = "PM" if hr >= 12 else "AM"
+    h12 = ((hr + 11) % 12) + 1
+    return f"{h12}:{minute:02d} {ap}" if minute else f"{h12} {ap}"
+
+
+def _d(days: int) -> dt.date:
+    return TODAY + dt.timedelta(days=days)
+
+
+def secret(name: str) -> str:
+    try:
+        return str(st.secrets.get(name, "") or "").strip()
+    except Exception:
+        return ""
+
+
+def supabase_credentials() -> tuple[str, str]:
+    return secret("SUPABASE_URL"), secret("SUPABASE_ANON_KEY")
+
+
+def supabase_ready() -> bool:
+    url, key = supabase_credentials()
+    return bool(create_client and url and key)
+
+
+def get_sb():
+    if create_client is None:
+        raise RuntimeError("Supabase package is not installed.")
+    if "sb" not in st.session_state:
+        url, key = supabase_credentials()
+        if not url or not key:
+            raise RuntimeError("Supabase secrets are not configured.")
+        st.session_state.sb = create_client(url, key)
+    token = st.session_state.get("auth", {}).get("access_token")
+    if token and hasattr(st.session_state.sb, "postgrest"):
+        auth = getattr(st.session_state.sb.postgrest, "auth", None)
+        if callable(auth):
+            auth(token)
+    return st.session_state.sb
+
+
+def obj_get(obj, name: str):
+    return obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
+
+
+def store_auth_response(response, fallback_email: str) -> bool:
+    session = obj_get(response, "session")
+    user = obj_get(response, "user") or obj_get(session, "user")
+    token = obj_get(session, "access_token")
+    uid = obj_get(user, "id")
+    if not uid or not token:
+        return False
+    st.session_state.auth = {
+        "id": uid,
+        "email": obj_get(user, "email") or fallback_email,
+        "access_token": token,
+        "refresh_token": obj_get(session, "refresh_token"),
+    }
+    st.session_state.guest = False
+    st.session_state._loaded_uid = None
+    st.session_state._last_saved = None
+    return True
+
+
+def sign_in(email: str, password: str) -> bool:
+    return store_auth_response(get_sb().auth.sign_in_with_password({"email": email.strip(), "password": password}), email)
+
+
+def sign_up(email: str, password: str) -> bool:
+    return store_auth_response(get_sb().auth.sign_up({"email": email.strip(), "password": password}), email)
+
+
+def sign_out() -> None:
+    try:
+        if "sb" in st.session_state:
+            st.session_state.sb.auth.sign_out()
+    except Exception:
+        pass
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+
+
+def send_password_reset(email: str) -> None:
+    get_sb().auth.reset_password_for_email(email.strip())
+
+
+def update_account(email: str | None = None, password: str | None = None) -> None:
+    attrs = {}
+    if email:
+        attrs["email"] = email.strip()
+    if password:
+        attrs["password"] = password
+    if attrs:
+        get_sb().auth.update_user(attrs)
+
+
+def load_user_data(uid: str) -> dict | None:
+    response = get_sb().table("planners").select("data").eq("user_id", uid).limit(1).execute()
+    rows = obj_get(response, "data") or []
+    return rows[0].get("data") if rows else None
+
+
+def save_user_data(uid: str) -> None:
+    data = snapshot()
+    if st.session_state.get("backup"):
+        data["_backup"] = st.session_state.backup
+    payload = {"user_id": uid, "data": data, "updated_at": dt.datetime.now(dt.timezone.utc).isoformat()}
+    get_sb().table("planners").upsert(payload, on_conflict="user_id").execute()
+
+
+TYPE_DEFAULTS = {
+    "final": (5, 10.0, 3),
+    "exam": (5, 8.0, 3),
+    "project": (4, 6.0, 3),
+    "paper": (4, 6.0, 3),
+    "quiz": (2, 1.5, 1),
+    "homework": (2, 2.0, 2),
+    "other": (3, 3.0, 2),
+}
+
+
+def detect_type(title: str, course: str = "") -> str:
+    text = f"{title} {course}".lower()
+    if "final" in text:
+        return "final"
+    if any(k in text for k in ("midterm", "exam", "test")):
+        return "exam"
+    if "quiz" in text:
+        return "quiz"
+    if any(k in text for k in ("project", "build", "app")):
+        return "project"
+    if any(k in text for k in ("paper", "essay", "research")):
+        return "paper"
+    if any(k in text for k in ("homework", "assignment", "problem set", "pset", "reading", "hw")):
+        return "homework"
+    return "other"
+
+
+STAGES = {
+    "exam": ["Review key chapters", "Work practice problems", "Make a summary sheet", "Final review"],
+    "paper": ["Research and outline", "Draft introduction", "Write body sections", "Revise and cite", "Final proofread"],
+    "project": ["Plan and set up", "Build core logic", "Add features", "Test and debug", "Polish and submit"],
+    "pset": ["Attempt first half", "Finish remaining", "Check and review"],
+    "quiz": ["Review notes", "Practice questions"],
+    "generic": ["Get started", "Make progress", "Review", "Finish and submit"],
+}
+
+
+def priority_score(a: Assignment) -> int:
+    days_left = max(0, (a.due - TODAY).days)
+    urgency = max(0.0, min(1.0, (21 - days_left) / 21))
+    raw = 0.40 * (a.weight / 5) + 0.38 * urgency + 0.14 * (a.diff / 3) + 0.08 * min(1, a.hours / 10)
+    return round(raw * 100)
+
+
+def pri_label(score: int) -> tuple[str, str]:
+    if score >= 66:
+        return "hi", "High"
+    if score >= 40:
+        return "med", "Medium"
+    return "lo", "Low"
+
+
+def breakdown(a: Assignment) -> list[Task]:
+    group = {"final": "exam", "exam": "exam", "paper": "paper", "project": "project", "quiz": "quiz", "homework": "pset"}.get(detect_type(a.title, a.course), "generic")
+    stages = STAGES[group]
+    n = max(2, min(len(stages), int((a.hours + 1.49) // 1.5)))
+    per = round(a.hours / n, 1)
+    return [Task(a.id * 100 + i, a.id, stages[min(i, len(stages) - 1)], a.course, a.color, per, a.due, i) for i in range(n)]
+
+
+def meal_windows() -> list[tuple[float, float]]:
+    return [(s, e) for s, e, _ in st.session_state.get("meals", DEFAULT_MEALS)] if st.session_state.get("meals_on", True) else []
+
+
+def free_slots() -> dict[str, list[tuple[float, float]]]:
+    slots = {}
+    for day in DAYS:
+        busy = sorted([(f.start, f.end) for f in st.session_state.fixed if f.day == day] + meal_windows())
+        open_slots, cursor = [], DAY_START
+        for start, end in busy:
+            if start - cursor >= 1:
+                open_slots.append((cursor, start))
+            cursor = max(cursor, end)
+        if DAY_END - cursor >= 1:
+            open_slots.append((cursor, DAY_END))
+        slots[day] = open_slots
+    return slots
+
+
+def generate_plan() -> None:
+    done_ids = {int(x) for x in st.session_state.get("task_done_ids", [])}
+    done_ids.update(t.id for t in st.session_state.get("tasks", []) if t.done)
+    tasks = []
+    for a in st.session_state.assignments:
+        for t in breakdown(a):
+            t.done = t.id in done_ids or getattr(a, "status", "") == "Done"
+            tasks.append(t)
+    score = {a.id: priority_score(a) for a in st.session_state.assignments}
+    tasks.sort(key=lambda t: (-score.get(t.assign_id, 0), t.order))
+    slots = free_slots()
+    used: dict[tuple[int, float], float] = {}
+    blocks, unscheduled = [], []
+    for t in [x for x in tasks if not x.done]:
+        due_off = (t.due - TODAY).days
+        placed = False
+        for off in range(HORIZON_DAYS):
+            if due_off >= 0 and off > due_off:
+                break
+            day = DAYS[(TODAY_IDX + off) % 7]
+            date = TODAY + dt.timedelta(days=off)
+            for start, end in slots.get(day, []):
+                key = (off, start)
+                consumed = used.get(key, 0)
+                gap = BREAK if consumed else 0
+                s = start + consumed + gap
+                length = min(t.hours, FOCUS_BLOCK, end - s)
+                if length >= 1:
+                    blocks.append(Block(day, s, s + length, t.title, t.course, t.color, t.id, date))
+                    used[key] = consumed + gap + length
+                    placed = True
+                    break
+            if placed:
+                break
+        if not placed:
+            unscheduled.append(t)
+    st.session_state.tasks = tasks
+    st.session_state.blocks = blocks
+    st.session_state.unscheduled = unscheduled
+    st.session_state.task_done_ids = sorted(t.id for t in tasks if t.done)
+
+
+def seed_state() -> None:
+    st.session_state.user = "Student"
+    st.session_state.streak = 3
+    st.session_state.history = [1, 2, 0, 3, 1.5, 2.5, 0]
+    st.session_state.next_id = 100
+    st.session_state.meals_on = True
+    st.session_state.meals = list(DEFAULT_MEALS)
+    st.session_state.fixed = [
+        Fixed("Mon", 9, 10.5, "CS 201 Lecture", "class"),
+        Fixed("Tue", 11, 12.5, "Psychology Lecture", "class"),
+        Fixed("Wed", 13, 14.5, "Math Lecture", "class"),
+        Fixed("Thu", 15, 18, "Work shift", "work"),
+        Fixed("Fri", 9, 10.5, "CS 201 Lecture", "class"),
+    ]
+    st.session_state.assignments = [
+        Assignment(1, "Psychology Research Paper", "PSY 201", _d(4), 8, 3, COLORS[3], 4),
+        Assignment(2, "Calculus Problem Set", "MATH 240", _d(1), 3, 2, COLORS[2], 2),
+        Assignment(3, "CS Project", "CS 201", _d(6), 6, 3, COLORS[0], 4),
+    ]
+    st.session_state.task_done_ids = []
+    generate_plan()
+
+
+def snapshot() -> dict:
+    return {
+        "user": st.session_state.user,
+        "streak": st.session_state.streak,
+        "history": st.session_state.history,
+        "next_id": st.session_state.next_id,
+        "meals_on": st.session_state.meals_on,
+        "meals": st.session_state.meals,
+        "fixed": [asdict(f) for f in st.session_state.fixed],
+        "assignments": [{**asdict(a), "due": a.due.isoformat()} for a in st.session_state.assignments],
+        "task_done_ids": st.session_state.get("task_done_ids", []),
+    }
+
+
+def restore_snapshot(snap: dict) -> None:
+    st.session_state.user = snap.get("user", "Student")
+    st.session_state.streak = snap.get("streak", 0)
+    st.session_state.history = snap.get("history", [0] * 7)
+    st.session_state.next_id = snap.get("next_id", 100)
+    st.session_state.meals_on = snap.get("meals_on", True)
+    st.session_state.meals = [tuple(m) for m in snap.get("meals", DEFAULT_MEALS)]
+    st.session_state.fixed = [Fixed(**f) for f in snap.get("fixed", [])]
+    st.session_state.assignments = []
+    allowed = set(Assignment.__dataclass_fields__)
+    for raw in snap.get("assignments", []):
+        data = {k: v for k, v in raw.items() if k in allowed}
+        data["due"] = dt.date.fromisoformat(raw["due"])
+        data.setdefault("status", "Not Started")
+        st.session_state.assignments.append(Assignment(**data))
+    st.session_state.task_done_ids = [int(x) for x in snap.get("task_done_ids", [])]
+    generate_plan()
+
+
+def push_undo(label: str) -> None:
+    st.session_state.undo_snapshot = snapshot()
+    st.session_state.undo_label = label
+
+
+def undo_last_change() -> bool:
+    snap = st.session_state.get("undo_snapshot")
+    if not snap:
+        return False
+    now = snapshot()
+    restore_snapshot(snap)
+    st.session_state.undo_snapshot = now
+    st.session_state.undo_label = "last change"
+    return True
+
+
+def set_task_done(task: Task, done: bool) -> None:
+    task.done = done
+    st.session_state.task_done_ids = sorted(t.id for t in st.session_state.tasks if t.done)
+
+
+def assignment_tasks(aid: int) -> list[Task]:
+    return [t for t in st.session_state.tasks if t.assign_id == aid]
+
+
+def assignment_status(a: Assignment) -> str:
+    tasks = assignment_tasks(a.id)
+    if tasks and all(t.done for t in tasks):
+        return "Done"
+    if tasks and any(t.done for t in tasks) and a.status == "Not Started":
+        return "In Progress"
+    return a.status if a.status in STATUSES else "Not Started"
+
+
+def status_class(status: str) -> str:
+    return {"Done": "status-done", "In Progress": "status-progress", "Not Started": "status-not"}.get(status, "status-not")
+
+
+def set_assignment_status(a: Assignment, status: str) -> None:
+    a.status = status
+    for t in assignment_tasks(a.id):
+        if status == "Done":
+            t.done = True
+        elif status == "Not Started":
+            t.done = False
+    st.session_state.task_done_ids = sorted(t.id for t in st.session_state.tasks if t.done)
+
+
+def compute_streak() -> int:
+    hist = st.session_state.get("history", [])
+    idx = len(hist) - 1
+    if idx >= 0 and hist[idx] == 0:
+        idx -= 1
+    count = 0
+    while idx >= 0 and hist[idx] > 0:
+        count += 1
+        idx -= 1
+    return count
+
+
+def unscheduled_titles() -> list[str]:
+    ids = {t.assign_id for t in st.session_state.get("unscheduled", [])}
+    return [a.title for a in st.session_state.assignments if a.id in ids]
+
+
+def add_months(base: dt.date, months: int) -> dt.date:
+    idx = base.month - 1 + months
+    return dt.date(base.year + idx // 12, idx % 12 + 1, 1)
+
+
+def init_state() -> None:
+    if st.session_state.get("auth"):
+        uid = st.session_state.auth["id"]
+        if st.session_state.get("_loaded_uid") != uid:
+            snap = load_user_data(uid)
+            if snap:
+                st.session_state.backup = snap.get("_backup")
+                restore_snapshot(snap)
+            elif st.session_state.get("pending_guest_snapshot"):
+                restore_snapshot(st.session_state.pop("pending_guest_snapshot"))
+            else:
+                seed_state()
+            st.session_state._loaded_uid = uid
+        return
+    if "assignments" not in st.session_state:
+        seed_state()
+    st.session_state.setdefault("calendar_month_offset", 0)
+    st.session_state.setdefault("calendar_selected_date", TODAY)
+    st.session_state.setdefault("active_page", PAGES[0])
+    st.session_state.setdefault("sidebar_page", st.session_state.active_page)
+    st.session_state.setdefault("top_page", st.session_state.active_page)
+
+
+def sync_page_from_sidebar() -> None:
+    st.session_state.active_page = st.session_state.sidebar_page
+    st.session_state.top_page = st.session_state.active_page
+
+
+def sync_page_from_top() -> None:
+    st.session_state.active_page = st.session_state.top_page
+    st.session_state.sidebar_page = st.session_state.active_page
+
+
+def login_gate() -> None:
+    if st.session_state.get("auth") or st.session_state.get("guest"):
+        return
+    st.markdown("""<div class="hero" style="text-align:center"><div class="b">Auto-Planner</div><div class="s">Your deadlines and study time organized into a realistic plan.</div></div>""", unsafe_allow_html=True)
+    if not supabase_ready():
+        st.info("Accounts need Supabase secrets. Guest mode works now.")
+    tab_login, tab_signup, tab_reset = st.tabs(["Log in", "Sign up", "Forgot password"])
+    with tab_login:
+        email = st.text_input("Email", key="login_email")
+        password = st.text_input("Password", type="password", key="login_password")
+        if st.button("Log in", type="primary", use_container_width=True, disabled=not supabase_ready()):
+            try:
+                if sign_in(email, password):
+                    st.rerun()
+            except Exception as exc:
+                st.error(f"Could not log in: {exc}")
+    with tab_signup:
+        email = st.text_input("Email", key="signup_email")
+        password = st.text_input("Password", type="password", key="signup_password")
+        if st.button("Create account", type="primary", use_container_width=True, disabled=not supabase_ready()):
+            try:
+                if len(password) < 6:
+                    st.warning("Use at least 6 characters.")
+                elif sign_up(email, password):
+                    st.rerun()
+                else:
+                    st.info("Check your email to confirm the account, then log in.")
+            except Exception as exc:
+                st.error(f"Could not create account: {exc}")
+    with tab_reset:
+        reset_email = st.text_input("Account email", key="reset_email")
+        if st.button("Send password reset", use_container_width=True, disabled=not supabase_ready()):
+            try:
+                send_password_reset(reset_email)
+                st.success("Password reset email sent if that account exists.")
+            except Exception as exc:
+                st.error(f"Could not send reset: {exc}")
+    st.divider()
+    if st.button("Try as guest", use_container_width=True):
+        st.session_state.guest = True
+        st.rerun()
+    st.caption("Guest mode is temporary. Log in to save automatically.")
+    st.stop()
+
+
+login_gate()
+init_state()
+
+
+def autosave() -> None:
+    auth = st.session_state.get("auth")
+    if not auth:
+        return
+    encoded = json.dumps(snapshot(), sort_keys=True)
+    if encoded == st.session_state.get("_last_saved"):
+        return
+    try:
+        save_user_data(auth["id"])
+        st.session_state._last_saved = encoded
+        st.session_state._save_error = ""
+    except Exception as exc:
+        st.session_state._save_error = str(exc)
+
+
+def build_ics() -> str:
+    stamp = dt.datetime.now().strftime("%Y%m%dT%H%M%SZ")
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Auto-Planner//EN", "CALSCALE:GREGORIAN", "X-WR-CALNAME:Auto-Planner"]
+    esc = lambda s: str(s).replace("\\", "\\\\").replace(",", "\\,").replace(";", "\\;")
+    for i, b in enumerate(st.session_state.blocks):
+        sh, sm = divmod(round(b.start * 60), 60)
+        eh, em = divmod(round(b.end * 60), 60)
+        lines += ["BEGIN:VEVENT", f"UID:study-{b.task_id}-{i}@auto-planner", f"DTSTAMP:{stamp}", f"DTSTART:{b.date:%Y%m%d}T{sh:02d}{sm:02d}00", f"DTEND:{b.date:%Y%m%d}T{eh:02d}{em:02d}00", f"SUMMARY:Study: {esc(b.title)} ({esc(b.course)})", "DESCRIPTION:Auto-scheduled study block.", "BEGIN:VALARM", "TRIGGER:-PT15M", "ACTION:DISPLAY", "DESCRIPTION:Study block starting soon", "END:VALARM", "END:VEVENT"]
+    for a in st.session_state.assignments:
+        lines += ["BEGIN:VEVENT", f"UID:due-{a.id}@auto-planner", f"DTSTAMP:{stamp}", f"DTSTART;VALUE=DATE:{a.due:%Y%m%d}", f"DTEND;VALUE=DATE:{(a.due + dt.timedelta(days=1)):%Y%m%d}", f"SUMMARY:DUE: {esc(a.title)} ({esc(a.course)})", f"DESCRIPTION:{esc(a.title)} is due. Status: {esc(a.status)}.", "END:VEVENT"]
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(lines)
+
+
+def gcal_link(title: str, day: dt.date, start: float, end: float) -> str:
+    sh, sm = divmod(round(start * 60), 60)
+    eh, em = divmod(round(end * 60), 60)
+    dates = f"{day:%Y%m%d}T{sh:02d}{sm:02d}00/{day:%Y%m%d}T{eh:02d}{em:02d}00"
+    return "https://calendar.google.com/calendar/render?" + urllib.parse.urlencode({"action": "TEMPLATE", "text": title, "dates": dates, "details": "Scheduled by Auto-Planner"})
+
+
+def render_overload_banner() -> None:
+    over = unscheduled_titles()
+    if over:
+        shown = ", ".join(over[:4]) + ("..." if len(over) > 4 else "")
+        st.markdown(f"""<div class="danger-banner"><b>{len(over)} assignment(s) do not fit before the deadline.</b><div class="muted">Affected: {html.escape(shown)}. Free up time, reduce estimated hours, or start now.</div></div>""", unsafe_allow_html=True)
+
+
+def render_block(b: Block, today_view: bool = False) -> None:
+    task = next((t for t in st.session_state.tasks if t.id == b.task_id), None)
+    if not task:
+        return
+    c1, c2, c3 = st.columns([0.12, 0.58, 0.30])
+    checked = c1.checkbox("Done", value=task.done, key=f"blk-{b.task_id}-{b.date}-{b.start}", label_visibility="collapsed")
+    if checked != task.done:
+        push_undo("update task")
+        set_task_done(task, checked)
+        st.session_state.history[-1] = max(0, st.session_state.history[-1] + (0.3 if checked else -0.3))
+        st.rerun()
+    style = "text-decoration:line-through;opacity:.55" if task.done else ""
+    c2.markdown(f"""<div class="card" style="margin:0 0 8px;padding:12px 14px;{style}"><b style="border-left:4px solid {b.color};padding-left:8px">{html.escape(b.title)}</b><div class="faint">{html.escape(b.course)} · {fmt_time(b.start)}-{fmt_time(b.end)}</div></div>""", unsafe_allow_html=True)
+    if today_view and not task.done:
+        if c3.button("Missed? Reschedule", key=f"miss-{b.task_id}-{b.start}", use_container_width=True):
+            push_undo("reschedule block")
+            reschedule(b.task_id)
+            st.rerun()
+
+
+def reschedule(task_id: int) -> None:
+    task = next((t for t in st.session_state.tasks if t.id == task_id), None)
+    if not task:
+        return
+    st.session_state.blocks = [b for b in st.session_state.blocks if b.task_id != task_id]
+    slots = free_slots()
+    for off in range(1, HORIZON_DAYS):
+        day = DAYS[(TODAY_IDX + off) % 7]
+        date = TODAY + dt.timedelta(days=off)
+        for start, end in slots.get(day, []):
+            if end - start >= 1:
+                st.session_state.blocks.append(Block(day, start, min(end, start + FOCUS_BLOCK), task.title, task.course, task.color, task.id, date))
+                st.toast(f"Moved to {date:%a, %b %d} at {fmt_time(start)}")
+                return
+    st.warning("No open slot found in the 30-day planning window.")
+
+
+def sidebar() -> None:
+    with st.sidebar:
+        auth = st.session_state.get("auth")
+        if auth:
+            st.caption(f"Signed in as {auth.get('email')}")
+            if st.button("Log out", use_container_width=True):
+                sign_out()
+                st.rerun()
+        else:
+            st.caption("Guest mode: not saved.")
+            if st.button("Sign up to save", use_container_width=True):
+                st.session_state.pending_guest_snapshot = snapshot()
+                st.session_state.guest = False
+                st.rerun()
+        st.markdown("### Auto-Planner")
+        st.caption(f"Hi {st.session_state.user} · {TODAY:%A, %b %d}")
+        st.session_state.sidebar_page = st.session_state.active_page
+        st.radio("Go to", PAGES, key="sidebar_page", on_change=sync_page_from_sidebar)
+        st.divider()
+        add_assignment_form("side")
+        st.divider()
+        st.download_button("Export plan (.ics)", build_ics(), "auto-planner.ics", "text/calendar", use_container_width=True)
+        with st.expander("Classes, work, and clubs"):
+            st.caption("These repeat every week. Add class twice if it meets Tuesday and Thursday.")
+            with st.form("fixed_form", clear_on_submit=True):
+                name = st.text_input("Name", placeholder="CHEM 101 Lecture")
+                kind = st.selectbox("Type", ["class", "work", "club"])
+                day = st.selectbox("Day", DAYS)
+                a, b = st.columns(2)
+                start = a.number_input("Start", 6.0, 21.5, 10.0, 0.5)
+                end = b.number_input("End", 6.5, 22.0, 11.5, 0.5)
+                if st.form_submit_button("Add weekly commitment", use_container_width=True):
+                    if name and end > start:
+                        push_undo("add commitment")
+                        st.session_state.fixed.append(Fixed(day, start, end, name, kind))
+                        generate_plan()
+                        st.rerun()
+            for idx, f in enumerate(st.session_state.fixed):
+                c1, c2 = st.columns([0.75, 0.25])
+                c1.caption(f"{f.day} {fmt_time(f.start)}-{fmt_time(f.end)} · {f.title}")
+                if c2.button("Remove", key=f"rmfixed-{idx}", use_container_width=True):
+                    push_undo("remove commitment")
+                    st.session_state.fixed.pop(idx)
+                    generate_plan()
+                    st.rerun()
+        with st.expander("Meal breaks"):
+            on = st.checkbox("Reserve meal times", value=st.session_state.meals_on)
+            breakfast = st.slider("Breakfast", 6.0, 10.0, st.session_state.meals[0][0], 0.5)
+            lunch = st.slider("Lunch", 11.0, 14.0, st.session_state.meals[1][0], 0.5)
+            dinner = st.slider("Dinner", 16.0, 20.0, st.session_state.meals[2][0], 0.5)
+            if (on, breakfast, lunch, dinner) != (st.session_state.meals_on, st.session_state.meals[0][0], st.session_state.meals[1][0], st.session_state.meals[2][0]):
+                push_undo("change meals")
+                st.session_state.meals_on = on
+                st.session_state.meals = [(breakfast, breakfast + .5, "Breakfast"), (lunch, lunch + 1, "Lunch"), (dinner, dinner + 1, "Dinner")]
+                generate_plan()
+                st.rerun()
+        st.divider()
+        st.markdown("**Save and data**")
+        st.caption("Auto-saving to your account." if auth else "Guest mode: changes and backups are temporary. Log in to save automatically.")
+        st.download_button("Download my data", json.dumps(snapshot(), indent=2), "autoplanner_data.json", "application/json", use_container_width=True)
+        upload = st.file_uploader("Restore from file", type=["json"])
+        if upload:
+            try:
+                push_undo("restore file")
+                restore_snapshot(json.load(upload))
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Could not restore that file: {exc}")
+        if st.session_state.get("undo_snapshot") and st.button(f"Undo {st.session_state.get('undo_label', 'last change')}", use_container_width=True):
+            undo_last_change()
+            st.rerun()
+        if st.button("Clear whole calendar", use_container_width=True):
+            push_undo("clear calendar")
+            st.session_state.backup = snapshot()
+            st.session_state.assignments = []
+            st.session_state.fixed = []
+            st.session_state.task_done_ids = []
+            generate_plan()
+            st.rerun()
+        if st.session_state.get("backup"):
+            if not auth:
+                st.caption("Restore is available now, but guest backups disappear after closing or refreshing.")
+            if st.button("Restore last backup", use_container_width=True):
+                restore_snapshot(st.session_state.backup)
+                st.rerun()
+
+
+def add_assignment_form(prefix: str) -> None:
+    with st.form(f"add-{prefix}", clear_on_submit=True):
+        st.markdown("**Add assignment**")
+        title = st.text_input("Title", key=f"{prefix}-title")
+        course = st.text_input("Course", key=f"{prefix}-course")
+        kind = st.selectbox("Type", list(TYPE_DEFAULTS), key=f"{prefix}-kind")
+        due = st.date_input("Due date", value=_d(5), key=f"{prefix}-due")
+        weight, hours_default, diff_default = TYPE_DEFAULTS[kind]
+        hours = st.number_input("Estimated hours", 0.5, 60.0, hours_default, 0.5, key=f"{prefix}-hours")
+        diff = st.select_slider("Difficulty", [1, 2, 3], value=diff_default, key=f"{prefix}-diff")
+        if st.form_submit_button("Add and auto-plan", use_container_width=True):
+            if not title.strip():
+                st.warning("Add a title first.")
+                return
+            push_undo("add assignment")
+            st.session_state.next_id += 1
+            st.session_state.assignments.append(Assignment(st.session_state.next_id, title.strip(), course.strip() or "General", due, hours, diff, COLORS[len(st.session_state.assignments) % len(COLORS)], weight))
+            generate_plan()
+            st.rerun()
+
+
+def page_dashboard() -> None:
+    if not st.session_state.assignments:
+        st.markdown("""<div class="hero"><div class="k">Welcome</div><div class="b">Build your first plan</div><div class="s">Add an assignment or import a syllabus, and Auto-Planner will schedule the work.</div></div>""", unsafe_allow_html=True)
+        st.info("No assignments yet.")
+        return
+    blocks = sorted([b for b in st.session_state.blocks if b.date == TODAY], key=lambda b: b.start)
+    done = sum(1 for b in blocks if any(t.id == b.task_id and t.done for t in st.session_state.tasks))
+    planned = sum(b.end - b.start for b in blocks)
+    total = len(blocks)
+    st.markdown(f"""<div class="hero"><div class="k">Today's focus</div><div class="b">{done}/{total} tasks done</div><div class="s">{planned:g}h planned today · {compute_streak()} day streak</div></div>""", unsafe_allow_html=True)
+    st.progress(done / total if total else 0)
+    render_overload_banner()
+    left, right = st.columns([0.58, 0.42])
+    with left:
+        st.markdown("#### Today")
+        if not blocks:
+            st.markdown("""<div class="empty-note">Nothing due today -- enjoy the break or get ahead.</div>""", unsafe_allow_html=True)
+        for b in blocks:
+            render_block(b, today_view=True)
+    with right:
+        st.markdown("#### Upcoming")
+        for a in sorted(st.session_state.assignments, key=lambda a: a.due)[:7]:
+            days = (a.due - TODAY).days
+            cls, lbl = ("hi", "Overdue") if days < 0 else pri_label(priority_score(a))
+            when = "today" if days == 0 else "tomorrow" if days == 1 else f"in {days}d"
+            st.markdown(f"""<div class="card"><b>{html.escape(a.title)}</b><span class="pill {cls}" style="float:right">{lbl}</span><div class="faint">{html.escape(a.course)} · due {when}</div><span class="pill {status_class(assignment_status(a))}">{assignment_status(a)}</span></div>""", unsafe_allow_html=True)
+
+
+def page_schedule() -> None:
+    st.markdown("### Schedule")
+    choices = [TODAY + dt.timedelta(days=i) for i in range(7)]
+    selected = st.selectbox("Day", choices, format_func=lambda d: f"{d:%a, %b %d}" + (" · Today" if d == TODAY else ""))
+    items = [(f.start, "fixed", f) for f in st.session_state.fixed if f.day == DAYS[selected.weekday()]]
+    if st.session_state.meals_on:
+        items += [(s, "fixed", Fixed(DAYS[selected.weekday()], s, e, label, "meal")) for s, e, label in st.session_state.meals]
+    items += [(b.start, "study", b) for b in st.session_state.blocks if b.date == selected]
+    items.sort(key=lambda x: x[0])
+    render_overload_banner()
+    if not items:
+        st.markdown("""<div class="empty-note">Nothing scheduled here.</div>""", unsafe_allow_html=True)
+    for _, typ, item in items:
+        if typ == "study":
+            render_block(item, today_view=(selected == TODAY))
+        else:
+            color = KIND_COLORS.get(item.kind, TEXT)
+            st.markdown(f"""<div class="card" style="border-left:5px solid {color}"><b>{html.escape(item.title)}</b><div class="faint">{KIND_LABELS.get(item.kind, item.kind)} · {fmt_time(item.start)}-{fmt_time(item.end)}</div></div>""", unsafe_allow_html=True)
+
+
+def calendar_items(day: dt.date) -> dict[str, list]:
+    return {
+        "due": [a for a in st.session_state.assignments if a.due == day],
+        "study": [b for b in st.session_state.blocks if b.date == day],
+        "fixed": [f for f in st.session_state.fixed if f.day == DAYS[day.weekday()]],
+        "meals": [Fixed(DAYS[day.weekday()], s, e, label, "meal") for s, e, label in st.session_state.meals] if st.session_state.meals_on else [],
+    }
+
+
+def render_day_details(day: dt.date) -> None:
+    items = calendar_items(day)
+    st.markdown(f"""<div class="card"><div class="faint">{day:%A}</div><div style="font-size:24px;font-weight:800">{day:%B %d, %Y}</div><div class="faint">{len(items['due'])} due · {len(items['study'])} study · {len(items['fixed'])} fixed</div></div>""", unsafe_allow_html=True)
+    if day > TODAY + dt.timedelta(days=HORIZON_DAYS - 1):
+        st.caption("Study blocks will be generated closer to this date.")
+    if not any(items.values()):
+        st.markdown("""<div class="empty-note">Nothing due today -- enjoy the break.</div>""", unsafe_allow_html=True)
+    for a in items["due"]:
+        st.markdown(f"""<div class="card" style="border-left:5px solid {DANGER}"><b>Due: {html.escape(a.title)}</b><div class="faint">{html.escape(a.course)} · ~{a.hours:g}h · {assignment_status(a)}</div></div>""", unsafe_allow_html=True)
+    for b in sorted(items["study"], key=lambda x: x.start):
+        render_block(b, today_view=(day == TODAY))
+    for f in sorted(items["fixed"] + items["meals"], key=lambda x: x.start):
+        color = KIND_COLORS.get(f.kind, TEXT)
+        st.markdown(f"""<div class="card" style="border-left:5px solid {color}"><b>{html.escape(f.title)}</b><div class="faint">{KIND_LABELS.get(f.kind, f.kind)} · {fmt_time(f.start)}-{fmt_time(f.end)}</div></div>""", unsafe_allow_html=True)
+
+
+def page_calendar() -> None:
+    st.markdown("### Calendar")
+    offset = max(0, min(CALENDAR_MONTHS - 1, int(st.session_state.get("calendar_month_offset", 0))))
+    month_start = add_months(TODAY.replace(day=1), offset)
+    c1, c2, c3, c4 = st.columns([.18, .44, .18, .20])
+    if c1.button("Prev", disabled=offset == 0, use_container_width=True):
+        st.session_state.calendar_month_offset = offset - 1
+        st.session_state.calendar_selected_date = add_months(TODAY.replace(day=1), offset - 1)
+        st.rerun()
+    c2.markdown(f"#### {month_start:%B %Y}")
+    if c3.button("Today", use_container_width=True):
+        st.session_state.calendar_month_offset = 0
+        st.session_state.calendar_selected_date = TODAY
+        st.rerun()
+    if c4.button("Next", disabled=offset == CALENDAR_MONTHS - 1, use_container_width=True):
+        st.session_state.calendar_month_offset = offset + 1
+        st.session_state.calendar_selected_date = add_months(TODAY.replace(day=1), offset + 1)
+        st.rerun()
+    view = st.segmented_control("View", ["Agenda", "Month grid"], default="Agenda") if hasattr(st, "segmented_control") else st.radio("View", ["Agenda", "Month grid"], horizontal=True)
+    selected = st.session_state.get("calendar_selected_date", TODAY)
+    if isinstance(selected, str):
+        selected = dt.date.fromisoformat(selected)
+    if selected.month != month_start.month or selected.year != month_start.year:
+        selected = month_start
+        st.session_state.calendar_selected_date = selected
+    if view == "Agenda":
+        render_day_details(selected)
+        st.markdown("#### This month")
+        for day in range(1, calendar.monthrange(month_start.year, month_start.month)[1] + 1):
+            d = dt.date(month_start.year, month_start.month, day)
+            items = calendar_items(d)
+            if items["due"] or items["study"] or items["fixed"]:
+                row, action = st.columns([.74, .26])
+                row.markdown(f"**{d:%a, %b %d}**  <span class='faint'>{len(items['due'])} due · {len(items['study'])} study · {len(items['fixed'])} fixed</span>", unsafe_allow_html=True)
+                if action.button("Open", key=f"open-{d}", use_container_width=True):
+                    st.session_state.calendar_selected_date = d
+                    st.rerun()
+        return
+    for week in calendar.Calendar(firstweekday=calendar.MONDAY).monthdayscalendar(month_start.year, month_start.month):
+        cols = st.columns(7)
+        for idx, num in enumerate(week):
+            if not num:
+                cols[idx].markdown("&nbsp;", unsafe_allow_html=True)
+                continue
+            d = dt.date(month_start.year, month_start.month, num)
+            items = calendar_items(d)
+            label = f"{num}" + (" Today" if d == TODAY else "")
+            if cols[idx].button(label, key=f"day-{d}", use_container_width=True, type="primary" if d == selected else "secondary"):
+                st.session_state.calendar_selected_date = d
+                st.rerun()
+            entries = [("Due", DANGER)] * len(items["due"]) + [("Study", BRAND)] * len(items["study"]) + [("Fixed", TEXT)] * len(items["fixed"])
+            for text, color in entries[:3]:
+                cols[idx].markdown(f"<div class='faint'><span style='color:{color}'>●</span> {text}</div>", unsafe_allow_html=True)
+            if len(entries) > 3:
+                cols[idx].caption(f"+{len(entries) - 3} more")
+    st.divider()
+    render_day_details(selected)
+
+
+COURSE_RE = re.compile(r"\b([A-Z]{2,4})\s?[- ]?(\d{2,3}[A-Z]?)\b")
+DATE_RE = re.compile(r"(\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}(?:/\d{2,4})?|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:,?\s*\d{4})?)", re.I)
+
+
+def course_from(text: str) -> str:
+    m = COURSE_RE.search(text)
+    return f"{m.group(1)} {m.group(2)}" if m else "General"
+
+
+def candidate(title: str, due: dt.date, course: str = "") -> dict:
+    kind = detect_type(title, course)
+    weight, hours, diff = TYPE_DEFAULTS[kind]
+    return {"title": title.strip()[:90] or "Untitled assignment", "course": course or course_from(title), "due": due, "hours": hours, "diff": diff, "weight": weight}
+
+
+def parse_text(text: str) -> list[dict]:
+    from dateutil import parser
+    out = []
+    for line in text.splitlines():
+        match = DATE_RE.search(line)
+        if not match:
+            continue
+        try:
+            parsed = parser.parse(match.group(0), fuzzy=True, default=dt.datetime(TODAY.year, 1, 1)).date()
+            if not re.search(r"\d{4}", match.group(0)) and parsed < TODAY:
+                parsed = parsed.replace(year=parsed.year + 1)
+        except Exception:
+            continue
+        title = re.sub(r"\b(due|by|deadline|submit)\b", "", line[:match.start()] + line[match.end():], flags=re.I)
+        out.append(candidate(title, parsed))
+    return out
+
+
+def parse_ics(data) -> list[dict]:
+    from icalendar import Calendar
+    if isinstance(data, bytes):
+        data = data.decode("utf-8", "ignore")
+    try:
+        cal = Calendar.from_ical(data)
+    except Exception as exc:
+        raise ValueError("That calendar file could not be read. Try exporting it again as .ics.") from exc
+    out = []
+    for event in cal.walk("VEVENT"):
+        summary = str(event.get("SUMMARY", "")).strip()
+        start = event.get("DTSTART")
+        if not summary or not start:
+            continue
+        value = start.dt
+        due = value.date() if isinstance(value, dt.datetime) else value
+        if isinstance(due, dt.date):
+            out.append(candidate(summary, due, course_from(summary)))
+    return out
+
+
+def fetch_feed(url: str) -> str:
+    import requests
+    url = url.strip()
+    if url.startswith("webcal://"):
+        url = "https://" + url[len("webcal://"):]
+    if not url.startswith(("http://", "https://")):
+        raise ValueError("Paste a full calendar URL that starts with http, https, or webcal.")
+    response = requests.get(url, timeout=15)
+    response.raise_for_status()
+    return response.text
+
+
+def parse_csv(file) -> list[dict]:
+    try:
+        df = pd.read_csv(file)
+    except Exception as exc:
+        raise ValueError("That CSV could not be read. Export it again as comma-separated values.") from exc
+    cols = {str(c).lower().strip(): c for c in df.columns}
+    title_col = next((cols[x] for x in ("title", "name", "assignment", "task") if x in cols), None)
+    due_col = next((cols[x] for x in ("due", "due date", "date", "deadline") if x in cols), None)
+    if title_col is None or due_col is None:
+        raise ValueError("CSV needs at least a title column and a due/date column.")
+    course_col = next((cols[x] for x in ("course", "class", "subject") if x in cols), None)
+    hours_col = next((cols[x] for x in ("hours", "hrs", "effort") if x in cols), None)
+    out = []
+    for _, row in df.iterrows():
+        if pd.isna(row[title_col]) or pd.isna(row[due_col]):
+            continue
+        try:
+            due = pd.to_datetime(row[due_col]).date()
+        except Exception:
+            continue
+        cand = candidate(str(row[title_col]), due, str(row[course_col]) if course_col and not pd.isna(row[course_col]) else "")
+        if hours_col and not pd.isna(row[hours_col]):
+            cand["hours"] = float(row[hours_col])
+        out.append(cand)
+    return out
+
+
+def commit_import(rows: list[dict]) -> int:
+    push_undo("import assignments")
+    count = 0
+    for row in rows:
+        st.session_state.next_id += 1
+        st.session_state.assignments.append(Assignment(st.session_state.next_id, str(row["title"]), str(row.get("course") or "General"), row["due"], float(row.get("hours") or 3), int(row.get("diff") or 2), COLORS[len(st.session_state.assignments) % len(COLORS)], int(row.get("weight") or 3)))
+        count += 1
+    generate_plan()
+    return count
+
+
+def page_import() -> None:
+    st.markdown("### Import assignments")
+    found = None
+    t1, t2, t3, t4 = st.tabs(["Paste text", "Upload .ics", "Calendar feed", "Upload CSV"])
+    with t1:
+        text = st.text_area("Paste syllabus text", height=160)
+        if st.button("Detect due dates", use_container_width=True):
+            found = parse_text(text)
+            if not found:
+                st.warning("No dates found. Try lines like 'Essay due June 22'.")
+    with t2:
+        upload = st.file_uploader("Upload .ics", type=["ics"])
+        if upload:
+            try:
+                found = parse_ics(upload.read())
+            except Exception as exc:
+                st.error(str(exc))
+    with t3:
+        url = st.text_input("Feed URL")
+        if st.button("Fetch feed", use_container_width=True):
+            try:
+                found = parse_ics(fetch_feed(url))
+                if not found:
+                    st.warning("Feed loaded, but no dated events were found.")
+            except Exception as exc:
+                st.error(f"Could not fetch that feed: {exc}")
+    with t4:
+        csv = st.file_uploader("Upload CSV", type=["csv"])
+        if csv:
+            try:
+                found = parse_csv(csv)
+            except Exception as exc:
+                st.error(str(exc))
+    if found is not None:
+        st.session_state.import_candidates = found
+    cands = st.session_state.get("import_candidates")
+    if cands:
+        st.markdown("#### Review and import")
+        df = pd.DataFrame([{"Import": True, "Title": c["title"], "Course": c["course"], "Due": c["due"], "Hours": c["hours"], "Difficulty": c["diff"], "Importance": c["weight"]} for c in cands])
+        edited = st.data_editor(df, hide_index=True, use_container_width=True)
+        chosen = edited[edited["Import"]]
+        if st.button(f"Import {len(chosen)} selected", type="primary", use_container_width=True, disabled=len(chosen) == 0):
+            rows = [{"title": r.Title, "course": r.Course, "due": r.Due if isinstance(r.Due, dt.date) else pd.to_datetime(r.Due).date(), "hours": r.Hours, "diff": r.Difficulty, "weight": r.Importance} for r in chosen.itertuples()]
+            commit_import(rows)
+            st.session_state.import_candidates = None
+            st.rerun()
+
+
+def page_tasks() -> None:
+    st.markdown("### Assignments")
+    with st.expander("Add an assignment"):
+        add_assignment_form("main")
+    flt = st.segmented_control("Filter", ["Active", "All", "Done"], default="Active") if hasattr(st, "segmented_control") else st.radio("Filter", ["Active", "All", "Done"], horizontal=True)
+    if not st.session_state.assignments:
+        st.info("No assignments yet.")
+        return
+    score = {a.id: priority_score(a) for a in st.session_state.assignments}
+    for a in sorted(st.session_state.assignments, key=lambda x: -score[x.id]):
+        tasks = assignment_tasks(a.id)
+        visible = tasks if flt == "All" else [t for t in tasks if t.done] if flt == "Done" else [t for t in tasks if not t.done]
+        if not visible and flt != "All":
+            continue
+        days = (a.due - TODAY).days
+        cls, lbl = ("hi", "Overdue") if days < 0 else pri_label(score[a.id])
+        status = assignment_status(a)
+        done = sum(t.done for t in tasks)
+        st.markdown(f"""<div class="card"><div style="display:flex;justify-content:space-between;gap:10px"><div><b>{html.escape(a.title)}</b><div class="faint">{html.escape(a.course)} · due {a.due:%b %d} · {done}/{len(tasks)} tasks</div></div><div><span class="pill {cls}">{lbl}</span> <span class="pill {status_class(status)}">{status}</span></div></div></div>""", unsafe_allow_html=True)
+        c1, c2 = st.columns([.7, .3])
+        new_status = c1.selectbox("Status", STATUSES, index=STATUSES.index(status), key=f"status-{a.id}", label_visibility="collapsed")
+        if new_status != status:
+            push_undo("change assignment status")
+            set_assignment_status(a, new_status)
+            st.rerun()
+        with c2.popover("Edit", use_container_width=True):
+            title = st.text_input("Title", a.title, key=f"title-{a.id}")
+            course = st.text_input("Course", a.course, key=f"course-{a.id}")
+            due = st.date_input("Due", a.due, key=f"due-{a.id}")
+            hours = st.number_input("Hours", .5, 60.0, float(a.hours), .5, key=f"hours-{a.id}")
+            diff = st.select_slider("Difficulty", [1, 2, 3], value=a.diff, key=f"diff-{a.id}")
+            weight = st.slider("Importance", 1, 5, a.weight, key=f"weight-{a.id}")
+            ecol1, ecol2 = st.columns(2)
+            if ecol1.button("Save", key=f"save-{a.id}", use_container_width=True):
+                push_undo("edit assignment")
+                a.title, a.course, a.due, a.hours, a.diff, a.weight = title or a.title, course or "General", due, hours, diff, weight
+                generate_plan()
+                st.rerun()
+            if ecol2.button("Delete", key=f"delete-{a.id}", use_container_width=True):
+                push_undo("delete assignment")
+                st.session_state.backup = snapshot()
+                st.session_state.assignments = [x for x in st.session_state.assignments if x.id != a.id]
+                generate_plan()
+                st.rerun()
+        for t in visible:
+            checked = st.checkbox(f"{t.title} · ~{t.hours:g}h", value=t.done, key=f"task-{t.id}")
+            if checked != t.done:
+                push_undo("update task")
+                set_task_done(t, checked)
+                st.session_state.history[-1] = max(0, st.session_state.history[-1] + (.3 if checked else -.3))
+                st.rerun()
+
+
+def page_plan() -> None:
+    st.markdown("### Auto Study Plan")
+    total_h = sum(b.end - b.start for b in st.session_state.blocks)
+    st.markdown(f"""<div class="card"><b>Generated for the next {HORIZON_DAYS} days</b><div class="faint">{len(st.session_state.blocks)} study blocks · {total_h:g} planned hours</div></div>""", unsafe_allow_html=True)
+    render_overload_banner()
+    if st.button("Build / refresh my study plan", type="primary", use_container_width=True):
+        push_undo("refresh plan")
+        generate_plan()
+        st.rerun()
+    st.download_button("Export this plan (.ics)", build_ics(), "auto-planner.ics", "text/calendar", use_container_width=True)
+    by_date: dict[dt.date, list[Block]] = {}
+    for b in st.session_state.blocks:
+        by_date.setdefault(b.date, []).append(b)
+    if not by_date:
+        st.info("Add an assignment to generate study blocks.")
+    for date in sorted(by_date):
+        st.markdown(f"#### {date:%A, %b %d}")
+        for b in sorted(by_date[date], key=lambda x: x.start):
+            render_block(b, today_view=(date == TODAY))
+
+
+def page_reminders() -> None:
+    st.markdown("### Reminders")
+    render_overload_banner()
+    shown = False
+    for a in sorted(st.session_state.assignments, key=lambda x: x.due):
+        days = (a.due - TODAY).days
+        if days <= 3:
+            shown = True
+            st.markdown(f"""<div class="card"><b>{html.escape(a.title)}</b><div class="faint">{html.escape(a.course)} · {'overdue' if days < 0 else 'due today' if days == 0 else f'due in {days}d'}</div></div>""", unsafe_allow_html=True)
+    if not shown:
+        st.markdown("""<div class="empty-note">No urgent reminders right now.</div>""", unsafe_allow_html=True)
+
+
+def page_progress() -> None:
+    st.markdown("### Progress")
+    done = sum(t.done for t in st.session_state.tasks)
+    total = len(st.session_state.tasks)
+    pct = done / total if total else 0
+    st.markdown(f"""<div class="hero"><div class="k">This plan</div><div class="b">{done}/{total} tasks · {pct:.0%}</div><div class="s">{compute_streak()} day streak · {sum(st.session_state.history):g}h this week</div></div>""", unsafe_allow_html=True)
+    st.progress(pct)
+    labels = [(TODAY - dt.timedelta(days=6 - i)).strftime("%a") for i in range(7)]
+    st.bar_chart(pd.DataFrame({"hours": st.session_state.history}, index=labels), color=BRAND, height=220)
+
+
+def page_account() -> None:
+    st.markdown("### Account")
+    auth = st.session_state.get("auth")
+    if not auth:
+        st.info("You are in guest mode. Sign up to save your planner automatically.")
+        if st.button("Sign up / log in", type="primary", use_container_width=True):
+            st.session_state.pending_guest_snapshot = snapshot()
+            st.session_state.guest = False
+            st.rerun()
+        return
+    st.caption(f"Signed in as {auth.get('email')}")
+    with st.form("account_form"):
+        new_email = st.text_input("New email", placeholder="leave blank to keep current")
+        new_password = st.text_input("New password", type="password", placeholder="leave blank to keep current")
+        if st.form_submit_button("Update account", use_container_width=True):
+            try:
+                update_account(new_email or None, new_password or None)
+                st.success("Account update submitted. Email changes may need confirmation.")
+            except Exception as exc:
+                st.error(f"Could not update account: {exc}")
+    if st.button("Log out", use_container_width=True):
+        sign_out()
+        st.rerun()
+
+
+sidebar()
+st.session_state.top_page = st.session_state.active_page
+st.selectbox("Quick jump", PAGES, key="top_page", on_change=sync_page_from_top)
+
+ROUTES = {
+    "Dashboard": page_dashboard,
+    "Schedule": page_schedule,
+    "Calendar": page_calendar,
+    "Assignments": page_tasks,
+    "Import": page_import,
+    "Study Plan": page_plan,
+    "Reminders": page_reminders,
+    "Progress": page_progress,
+    "Account": page_account,
+}
+
+ROUTES[st.session_state.active_page]()
+autosave()
+if st.session_state.get("_save_error"):
+    st.warning(f"Auto-save could not reach Supabase: {st.session_state._save_error}")
+elif st.session_state.get("auth"):
+    st.caption("Auto-Planner · saved to your account.")
+else:
+    st.caption("Auto-Planner · guest mode, not saved.")

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Auto-Planner">
+  <rect width="512" height="512" rx="108" fill="#5b6ef5"/>
+  <path d="M143 151c0-20 16-36 36-36h154c20 0 36 16 36 36v210c0 20-16 36-36 36H179c-20 0-36-16-36-36V151z" fill="#fff"/>
+  <path d="M185 183h142M185 235h82M185 287h118M185 339h70" stroke="#5b6ef5" stroke-width="24" stroke-linecap="round"/>
+  <path d="M313 214 256 326h60l-30 82 91-124h-62l28-70h-30z" fill="#27b8a6"/>
+</svg>

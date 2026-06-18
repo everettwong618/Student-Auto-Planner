@@ -1,0 +1,12 @@
+.streamlit/secrets.toml
+
+data/*.json
+__pycache__/
+*.py[cod]
+
+.env
+.venv/
+venv/
+
+out.log
+err.log
