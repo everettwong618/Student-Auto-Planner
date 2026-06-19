@@ -991,7 +991,14 @@ def page_calendar() -> None:
         st.session_state.calendar_month_offset = offset + 1
         st.session_state.calendar_selected_date = add_months(TODAY.replace(day=1), offset + 1)
         st.rerun()
-    view = st.segmented_control("View", ["Agenda", "Month grid"], default="Agenda", key="cal_view") if hasattr(st, "segmented_control") else st.radio("View", ["Agenda", "Month grid"], horizontal=True, key="cal_view")
+    # Read the view from session_state (not the widget return) so it never
+    # diverges from what the toggle shows after Prev/Next/Today reruns.
+    st.session_state.setdefault("cal_view", "Agenda")
+    if hasattr(st, "segmented_control"):
+        st.segmented_control("View", ["Agenda", "Month grid"], key="cal_view")
+    else:
+        st.radio("View", ["Agenda", "Month grid"], horizontal=True, key="cal_view")
+    view = st.session_state.cal_view or "Agenda"
     selected = st.session_state.get("calendar_selected_date", TODAY)
     if isinstance(selected, str):
         selected = dt.date.fromisoformat(selected)
@@ -1012,12 +1019,17 @@ def page_calendar() -> None:
                     st.rerun()
         return
     st.markdown(render_month_grid(month_start, selected), unsafe_allow_html=True)
-    st.caption("● red = due  ·  ● teal = study  ·  ● dark = class/work/club")
+    st.markdown(
+        f"<div class='faint' style='margin:2px 0 6px'>"
+        f"<span style='color:{DANGER};font-size:15px'>●</span> due &nbsp;&nbsp;"
+        f"<span style='color:{BRAND};font-size:15px'>●</span> study &nbsp;&nbsp;"
+        f"<span style='color:{TEXT};font-size:15px'>●</span> class / work / club</div>",
+        unsafe_allow_html=True)
     last_day = calendar.monthrange(month_start.year, month_start.month)[1]
     picked = st.date_input(
         "Show a day's details", value=selected,
         min_value=dt.date(month_start.year, month_start.month, 1),
-        max_value=dt.date(month_start.year, month_start.month, last_day), key="cal_pick")
+        max_value=dt.date(month_start.year, month_start.month, last_day))
     if picked != selected:
         st.session_state.calendar_selected_date = picked
         st.rerun()
