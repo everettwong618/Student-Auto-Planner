@@ -148,6 +148,8 @@ def inject_ui() -> None:
         .study-card.done {text-decoration:line-through;opacity:.58;}
         .study-title {border-left:4px solid var(--task-color,#01696f);padding-left:8px;font-weight:800;color:#28251d;}
         .study-meta {display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px;}
+        .study-links {display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;}
+        .study-links a {font-size:12px;font-weight:800;color:#01696f;text-decoration:none;background:#e7f4ee;border:1px solid rgba(1,105,111,.14);border-radius:999px;padding:6px 10px;}
         .assignment-card {background:white;border:1px solid rgba(40,37,29,.08);border-radius:12px;padding:14px 16px;margin:10px 0;box-shadow:0 6px 18px rgba(40,37,29,.07);}
         .assignment-head {display:flex;justify-content:space-between;gap:10px;align-items:flex-start;}
         .assignment-title {font-weight:800;color:#28251d;line-height:1.25;}
@@ -892,6 +894,7 @@ def render_block(b: Block, today_view: bool = False) -> None:
         st.rerun()
     done_class = "done" if task.done else ""
     status = "Done" if task.done else "Study"
+    calendar_url = html.escape(gcal_link(f"Study: {b.title}", b.date, b.start, b.end), quote=True)
     c2.markdown(
         f"""<div class="study-card {done_class}" style="--task-color:{b.color}">
         <div class="study-title">{html.escape(b.title)}</div>
@@ -899,7 +902,9 @@ def render_block(b: Block, today_view: bool = False) -> None:
         <span class="faint">{html.escape(b.course)}</span>
         <span class="pill status-progress">{fmt_time(b.start)}-{fmt_time(b.end)}</span>
         <span class="pill {status_class('Done' if task.done else 'In Progress')}">{status}</span>
-        </div></div>""",
+        </div>
+        <div class="study-links"><a href="{calendar_url}" target="_blank" rel="noopener">Add to Google Calendar</a></div>
+        </div>""",
         unsafe_allow_html=True,
     )
     if today_view and not task.done:

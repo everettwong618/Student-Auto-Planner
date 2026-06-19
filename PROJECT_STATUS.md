@@ -51,6 +51,8 @@ again editable UTF-8 source and compiles successfully.
   Commitments, and Meals sections.
 - More touch-friendly study block cards with clearer status/time badges and a
   full-width missed/reschedule action on today's blocks.
+- Study block cards include an "Add to Google Calendar" link for quickly copying
+  an individual block into Google Calendar.
 - Cleaner assignment cards on Dashboard and Assignments with responsive badges,
   due timing, and task progress bars.
 - Consistent polished page headers across the main app pages with short
