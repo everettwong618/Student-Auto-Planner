@@ -49,6 +49,8 @@ again editable UTF-8 source and compiles successfully.
   Selected-day details appear above the grid immediately after tapping a date.
 - Clean tapped-day plan panel with summary badges and separate Due, Study Plan,
   Commitments, and Meals sections.
+- More touch-friendly study block cards with clearer status/time badges and a
+  full-width missed/reschedule action on today's blocks.
 - PWA manifest/icons for iPhone Home Screen install.
 - Safer testing launchers:
   - `Start Auto-Planner.bat` for computer-only local testing.

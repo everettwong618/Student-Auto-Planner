@@ -144,6 +144,10 @@ def inject_ui() -> None:
         .muted {color:#5f5a4d;} .faint {color:#837d70;font-size:12px;}
         .danger-banner {background:#fff1f1;border:1px solid rgba(217,75,75,.32);border-left:6px solid #d94b4b;border-radius:12px;padding:14px 16px;margin:12px 0;box-shadow:0 6px 18px rgba(217,75,75,.08);}
         .empty-note {background:#fbfaf7;border:1px dashed rgba(40,37,29,.18);border-radius:12px;padding:16px;margin:10px 0;color:#5f5a4d;}
+        .study-card {background:white;border:1px solid rgba(40,37,29,.08);border-radius:12px;padding:12px 14px;margin:0 0 8px;box-shadow:0 5px 14px rgba(40,37,29,.06);}
+        .study-card.done {text-decoration:line-through;opacity:.58;}
+        .study-title {border-left:4px solid var(--task-color,#01696f);padding-left:8px;font-weight:800;color:#28251d;}
+        .study-meta {display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px;}
         .quick-nav {display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin:8px 0 16px;}
         .quick-nav a {background:white;border:1px solid rgba(40,37,29,.08);border-radius:12px;min-height:52px;padding:8px 6px;text-align:center;box-shadow:0 4px 12px rgba(40,37,29,.05);text-decoration:none;color:#28251d;display:flex;flex-direction:column;align-items:center;justify-content:center;}
         .quick-nav a.active {background:#e7f4ee;border-color:rgba(1,105,111,.28);box-shadow:0 6px 18px rgba(1,105,111,.10);}
@@ -178,6 +182,7 @@ def inject_ui() -> None:
           .hero {padding:16px;border-radius:12px;}
           .hero .b {font-size:24px;}
           .card {padding:13px 14px;}
+          .study-card {padding:11px 12px;}
           .quick-nav {grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;}
           .quick-nav a {min-height:48px;border-radius:11px;padding:7px 5px;}
           .stat-grid {grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
@@ -817,17 +822,27 @@ def render_block(b: Block, today_view: bool = False) -> None:
     task = next((t for t in st.session_state.tasks if t.id == b.task_id), None)
     if not task:
         return
-    c1, c2, c3 = st.columns([0.12, 0.58, 0.30])
+    c1, c2 = st.columns([0.16, 0.84])
     checked = c1.checkbox("Done", value=task.done, key=f"blk-{b.task_id}-{b.date}-{b.start}", label_visibility="collapsed")
     if checked != task.done:
         push_undo("update task")
         set_task_done(task, checked)
         st.session_state.history[-1] = max(0, st.session_state.history[-1] + (0.3 if checked else -0.3))
         st.rerun()
-    style = "text-decoration:line-through;opacity:.55" if task.done else ""
-    c2.markdown(f"""<div class="card" style="margin:0 0 8px;padding:12px 14px;{style}"><b style="border-left:4px solid {b.color};padding-left:8px">{html.escape(b.title)}</b><div class="faint">{html.escape(b.course)} - {fmt_time(b.start)}-{fmt_time(b.end)}</div></div>""", unsafe_allow_html=True)
+    done_class = "done" if task.done else ""
+    status = "Done" if task.done else "Study"
+    c2.markdown(
+        f"""<div class="study-card {done_class}" style="--task-color:{b.color}">
+        <div class="study-title">{html.escape(b.title)}</div>
+        <div class="study-meta">
+        <span class="faint">{html.escape(b.course)}</span>
+        <span class="pill status-progress">{fmt_time(b.start)}-{fmt_time(b.end)}</span>
+        <span class="pill {status_class('Done' if task.done else 'In Progress')}">{status}</span>
+        </div></div>""",
+        unsafe_allow_html=True,
+    )
     if today_view and not task.done:
-        if c3.button("Missed? Reschedule", key=f"miss-{b.task_id}-{b.start}", use_container_width=True):
+        if st.button("Missed? Reschedule this block", key=f"miss-{b.task_id}-{b.start}", use_container_width=True):
             push_undo("reschedule block")
             reschedule(b.task_id)
             st.rerun()
