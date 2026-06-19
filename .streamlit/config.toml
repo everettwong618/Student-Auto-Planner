@@ -1,7 +1,10 @@
 # Auto-Planner default settings — so the app always launches the same easy way.
+# NOTE: do NOT set server.port or server.address here.
+# Streamlit Community Cloud requires its own port (8501) and will fail its health
+# check if we override it. Local testing uses the launchers
+# (Start Auto-Planner.bat / ...for iPhone.bat), which pass --server.port 8600 and
+# the right --server.address on the command line instead.
 [server]
-port = 8600          # not 8501 (that port is in use on this machine)
-address = "localhost" # computer-only testing by default
 headless = true      # skip Streamlit's first-run email prompt
 enableStaticServing = true
 
