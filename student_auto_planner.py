@@ -119,35 +119,6 @@ def inject_ui() -> None:
         link("manifest", "/app/static/manifest.webmanifest");
         link("icon", "/app/static/icon-192.png", {type: "image/png"});
         link("apple-touch-icon", "/app/static/icon-180.png");
-        if (!window.__autoPlannerSwipeNav) {
-          window.__autoPlannerSwipeNav = true;
-          let startX = 0, startY = 0;
-          function clickFirst(selectors) {
-            for (const selector of selectors) {
-              const el = window.parent.document.querySelector(selector);
-              if (el) { el.click(); return true; }
-            }
-            return false;
-          }
-          window.parent.document.addEventListener("touchstart", (event) => {
-            const t = event.touches && event.touches[0];
-            if (!t) return;
-            startX = t.clientX; startY = t.clientY;
-          }, {passive:true});
-          window.parent.document.addEventListener("touchend", (event) => {
-            const t = event.changedTouches && event.changedTouches[0];
-            if (!t) return;
-            const dx = t.clientX - startX;
-            const dy = Math.abs(t.clientY - startY);
-            if (dy > 70 || Math.abs(dx) < 70) return;
-            if (startX < 28 && dx > 0) {
-              clickFirst(['[data-testid="collapsedControl"] button', '[data-testid="collapsedControl"]']);
-            }
-            if (dx < 0) {
-              clickFirst(['[data-testid="stSidebarCollapseButton"] button', '[data-testid="stSidebarCollapseButton"]']);
-            }
-          }, {passive:true});
-        }
         </script>
         """,
         unsafe_allow_javascript=True,
@@ -194,6 +165,11 @@ def inject_ui() -> None:
         table.cal .dnum {font-size:12px;font-weight:700;color:#28251d;}
         table.cal .dots {display:flex;flex-wrap:wrap;gap:2px;justify-content:center;margin-top:3px;}
         table.cal .dot {width:6px;height:6px;border-radius:50%;display:inline-block;}
+        .cal-weekdays {display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin-top:8px;}
+        .cal-weekday {text-align:center;color:#837d70;font-size:11px;font-weight:800;}
+        div[data-testid="stHorizontalBlock"]:has(button[kind]) {gap:4px;}
+        .cal-dot-row {display:flex;justify-content:center;gap:2px;min-height:8px;margin:-7px 0 5px;}
+        .cal-mini-dot {width:5px;height:5px;border-radius:50%;display:inline-block;}
         @media (max-width: 700px) {
           .block-container {padding-left:.6rem;padding-right:.6rem;padding-top:.8rem;}
           .hero {padding:16px;border-radius:12px;}
@@ -203,6 +179,8 @@ def inject_ui() -> None:
           table.cal td {height:40px;}
           table.cal .dnum {font-size:11px;}
           table.cal .dot {width:5px;height:5px;}
+          .cal-weekdays {gap:3px;}
+          .cal-weekday {font-size:10px;}
         }
         </style>
         """,
@@ -1063,6 +1041,53 @@ def render_month_grid(month_start: dt.date, selected: dt.date) -> str:
     return f"<table class='cal'><thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table>"
 
 
+def render_clickable_month_grid(month_start: dt.date, selected: dt.date) -> None:
+    """Interactive month grid: each day is a real Streamlit button."""
+    st.markdown(
+        "<div class='cal-weekdays'>"
+        + "".join(f"<div class='cal-weekday'>{day}</div>" for day in DAYS)
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+    weeks = calendar.Calendar(firstweekday=calendar.MONDAY).monthdayscalendar(
+        month_start.year, month_start.month
+    )
+    for week_idx, week in enumerate(weeks):
+        cols = st.columns(7)
+        for day_idx, num in enumerate(week):
+            col = cols[day_idx]
+            if not num:
+                col.markdown(
+                    "<div style='min-height:48px;border:1px solid transparent'></div>",
+                    unsafe_allow_html=True,
+                )
+                continue
+            day = dt.date(month_start.year, month_start.month, num)
+            items = calendar_items(day)
+            label = str(num)
+            if day == TODAY:
+                label = f"{num} •"
+            if col.button(
+                label,
+                key=f"calbtn-{day.isoformat()}",
+                use_container_width=True,
+                type="primary" if day == selected else "secondary",
+            ):
+                st.session_state.calendar_selected_date = day
+                st.rerun()
+            dots = ""
+            for color, n in (
+                (DANGER, len(items["due"])),
+                (BRAND, len(items["study"])),
+                (FIXED_DOT, len(items["fixed"])),
+            ):
+                dots += (
+                    f"<span class='cal-mini-dot' style='background:{color}'></span>"
+                    * min(n, 3)
+                )
+            col.markdown(f"<div class='cal-dot-row'>{dots}</div>", unsafe_allow_html=True)
+
+
 def page_calendar() -> None:
     st.markdown("### Calendar")
     if st.button("Connect calendars / sync feeds", use_container_width=True, key="calendar-open-sync"):
@@ -1110,7 +1135,7 @@ def page_calendar() -> None:
                     st.session_state.calendar_selected_date = d
                     st.rerun()
         return
-    st.markdown(render_month_grid(month_start, selected), unsafe_allow_html=True)
+    render_clickable_month_grid(month_start, selected)
     st.markdown(
         f"<div class='faint' style='margin:2px 0 6px'>"
         f"<span style='color:{DANGER};font-size:15px'>●</span> due &nbsp;&nbsp;"

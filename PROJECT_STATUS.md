@@ -40,8 +40,9 @@ again editable UTF-8 source and compiles successfully.
 - Larger touch targets and custom Inter-based styling.
 - Warm off-white/teal/indigo theme in `.streamlit/config.toml`.
 - Polished dashboard stat cards and a quick-add assignment panel.
-- Compact phone-friendly month grid with persistent Agenda/Month view state and
-  visible due/study/fixed color legend.
+- Compact phone-friendly month grid with persistent Agenda/Month view state,
+  visible due/study/fixed color legend, and tappable day buttons that open that
+  day's details.
 - PWA manifest/icons for iPhone Home Screen install.
 - Safer testing launchers:
   - `Start Auto-Planner.bat` for computer-only local testing.
@@ -77,8 +78,9 @@ Core behavior:
   and Outlook feeds.
 - Direct private iPhone/Apple Calendar sync is not built yet. The current path is
   connecting a shareable/subscribed iCloud/Google/Outlook/Canvas iCal feed URL.
-- Swipe-to-open sidebar is not reliable in Streamlit on iPhone; the app should
-  rely on visible Quick jump/action-bar navigation instead.
+- Swipe-to-open sidebar was removed because Streamlit on iPhone reformatted the
+  layout instead of reliably opening/closing the menu. The app relies on visible
+  Quick jump/action-bar navigation instead.
 - Native App Store app is not built; current mobile install is a Home Screen web
   app.
 - Streamlit Community Cloud deployment and multi-account smoke testing still need
