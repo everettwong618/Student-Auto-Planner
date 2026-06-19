@@ -931,6 +931,55 @@ def reschedule(task_id: int) -> None:
     st.warning("No open slot found in the 30-day planning window.")
 
 
+def render_data_tools(auth: dict | None, prefix: str = "data") -> None:
+    st.markdown("**Save and data**")
+    st.caption("Auto-saving to your account." if auth else "Guest mode: changes and backups are temporary. Log in to save automatically.")
+    st.download_button(
+        "Download my data",
+        json.dumps(snapshot(), indent=2),
+        "autoplanner_data.json",
+        "application/json",
+        use_container_width=True,
+        key=f"{prefix}-download-data",
+    )
+    upload = st.file_uploader("Restore from file", type=["json"], key=f"{prefix}-restore-file")
+    if upload:
+        try:
+            push_undo("restore file")
+            restore_snapshot(json.load(upload))
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Could not restore that file: {exc}")
+    if st.session_state.get("undo_snapshot") and st.button(f"Undo {st.session_state.get('undo_label', 'last change')}", use_container_width=True, key=f"{prefix}-undo"):
+        undo_last_change()
+        st.rerun()
+    confirm_key = f"{prefix}_confirm_clear"
+    if st.session_state.get(confirm_key):
+        st.warning("This will remove all assignments, commitments, and study blocks from this planner.")
+        c1, c2 = st.columns(2)
+        if c1.button("Yes, clear it", use_container_width=True, key=f"{prefix}-clear-confirm"):
+            push_undo("clear calendar")
+            st.session_state.backup = snapshot()
+            st.session_state.assignments = []
+            st.session_state.fixed = []
+            st.session_state.task_done_ids = []
+            st.session_state[confirm_key] = False
+            generate_plan()
+            st.rerun()
+        if c2.button("Cancel", use_container_width=True, key=f"{prefix}-clear-cancel"):
+            st.session_state[confirm_key] = False
+            st.rerun()
+    elif st.button("Clear whole calendar", use_container_width=True, key=f"{prefix}-clear-start"):
+        st.session_state[confirm_key] = True
+        st.rerun()
+    if st.session_state.get("backup"):
+        if not auth:
+            st.caption("Restore is available now, but guest backups disappear after closing or refreshing.")
+        if st.button("Restore last backup", use_container_width=True, key=f"{prefix}-restore-backup"):
+            restore_snapshot(st.session_state.backup)
+            st.rerun()
+
+
 def sidebar() -> None:
     with st.sidebar:
         auth = st.session_state.get("auth")
@@ -988,34 +1037,7 @@ def sidebar() -> None:
                 generate_plan()
                 st.rerun()
         st.divider()
-        st.markdown("**Save and data**")
-        st.caption("Auto-saving to your account." if auth else "Guest mode: changes and backups are temporary. Log in to save automatically.")
-        st.download_button("Download my data", json.dumps(snapshot(), indent=2), "autoplanner_data.json", "application/json", use_container_width=True)
-        upload = st.file_uploader("Restore from file", type=["json"])
-        if upload:
-            try:
-                push_undo("restore file")
-                restore_snapshot(json.load(upload))
-                st.rerun()
-            except Exception as exc:
-                st.error(f"Could not restore that file: {exc}")
-        if st.session_state.get("undo_snapshot") and st.button(f"Undo {st.session_state.get('undo_label', 'last change')}", use_container_width=True):
-            undo_last_change()
-            st.rerun()
-        if st.button("Clear whole calendar", use_container_width=True):
-            push_undo("clear calendar")
-            st.session_state.backup = snapshot()
-            st.session_state.assignments = []
-            st.session_state.fixed = []
-            st.session_state.task_done_ids = []
-            generate_plan()
-            st.rerun()
-        if st.session_state.get("backup"):
-            if not auth:
-                st.caption("Restore is available now, but guest backups disappear after closing or refreshing.")
-            if st.button("Restore last backup", use_container_width=True):
-                restore_snapshot(st.session_state.backup)
-                st.rerun()
+        render_data_tools(auth, "side-data")
 
 
 def add_assignment_form(prefix: str) -> None:
@@ -1852,6 +1874,8 @@ def page_account() -> None:
             st.session_state.pending_guest_snapshot = snapshot()
             st.session_state.guest = False
             st.rerun()
+        st.divider()
+        render_data_tools(auth, "account-data")
         return
     st.caption(f"Signed in as {auth.get('email')}")
     with st.form("account_form"):
@@ -1863,6 +1887,8 @@ def page_account() -> None:
                 st.success("Account update submitted. Email changes may need confirmation.")
             except Exception as exc:
                 st.error(f"Could not update account: {exc}")
+    st.divider()
+    render_data_tools(auth, "account-data")
     if st.button("Log out", use_container_width=True):
         sign_out()
         st.rerun()

@@ -23,6 +23,10 @@ again editable UTF-8 source and compiles successfully.
 - Assignment status tracking: Not Started, In Progress, Done.
 - Persisted completed task IDs so progress survives replans and saves.
 - Single-level undo for common edits, deletes, imports, clears, and schedule changes.
+- Account page exposes data download/restore/undo/backup tools so mobile users
+  do not need the sidebar for planner data management.
+- Clearing the whole calendar now requires a confirmation step before deleting
+  assignments, commitments, and generated blocks.
 - One-tap "Missed? Reschedule" on today's study blocks.
 - Loud overload banner when work cannot fit before deadlines.
 - Friendlier CSV/ICS import errors.
