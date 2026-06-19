@@ -23,6 +23,7 @@ again editable UTF-8 source and compiles successfully.
 - Recurring classes/work/clubs and meal-break controls are also available from
   the Schedule page, so mobile users can manage them without opening the sidebar.
 - Assignment status tracking: Not Started, In Progress, Done.
+- Assignments page supports sorting by Priority, Due date, Course, or Status.
 - Persisted completed task IDs so progress survives replans and saves.
 - Single-level undo for common edits, deletes, imports, clears, and schedule changes.
 - Account page exposes data download/restore/undo/backup tools so mobile users

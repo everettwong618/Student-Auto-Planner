@@ -1789,12 +1789,25 @@ def page_tasks() -> None:
     add_open = bool(st.session_state.pop("show_add_assignment", False))
     with st.expander("Add an assignment", expanded=add_open):
         add_assignment_form("main")
-    flt = st.segmented_control("Filter", ["Active", "All", "Done"], default="Active") if hasattr(st, "segmented_control") else st.radio("Filter", ["Active", "All", "Done"], horizontal=True)
+    flt_col, sort_col = st.columns([0.58, 0.42])
+    with flt_col:
+        flt = st.segmented_control("Filter", ["Active", "All", "Done"], default="Active") if hasattr(st, "segmented_control") else st.radio("Filter", ["Active", "All", "Done"], horizontal=True)
+    with sort_col:
+        sort_by = st.selectbox("Sort", ["Priority", "Due date", "Course", "Status"], key="assignment-sort")
     if not st.session_state.assignments:
         st.info("No assignments yet.")
         return
     score = {a.id: priority_score(a) for a in st.session_state.assignments}
-    for a in sorted(st.session_state.assignments, key=lambda x: -score[x.id]):
+    status_rank = {"In Progress": 0, "Not Started": 1, "Done": 2}
+    def assignment_sort_key(a: Assignment):
+        if sort_by == "Due date":
+            return (a.due, -score[a.id], a.title.lower())
+        if sort_by == "Course":
+            return (a.course.lower(), a.due, -score[a.id])
+        if sort_by == "Status":
+            return (status_rank.get(assignment_status(a), 9), a.due, -score[a.id])
+        return (-score[a.id], a.due, a.title.lower())
+    for a in sorted(st.session_state.assignments, key=assignment_sort_key):
         tasks = assignment_tasks(a.id)
         visible = tasks if flt == "All" else [t for t in tasks if t.done] if flt == "Done" else [t for t in tasks if not t.done]
         if not visible and flt != "All":
