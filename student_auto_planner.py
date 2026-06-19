@@ -150,6 +150,8 @@ def inject_ui() -> None:
         .study-meta {display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px;}
         .study-links {display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;}
         .study-links a {font-size:12px;font-weight:800;color:#01696f;text-decoration:none;background:#e7f4ee;border:1px solid rgba(1,105,111,.14);border-radius:999px;padding:6px 10px;}
+        .assignment-links {display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
+        .assignment-links a {font-size:12px;font-weight:800;color:#4157c8;text-decoration:none;background:#e4eef8;border:1px solid rgba(65,87,200,.14);border-radius:999px;padding:6px 10px;}
         .assignment-card {background:white;border:1px solid rgba(40,37,29,.08);border-radius:12px;padding:14px 16px;margin:10px 0;box-shadow:0 6px 18px rgba(40,37,29,.07);}
         .assignment-head {display:flex;justify-content:space-between;gap:10px;align-items:flex-start;}
         .assignment-title {font-weight:800;color:#28251d;line-height:1.25;}
@@ -839,6 +841,16 @@ def gcal_link(title: str, day: dt.date, start: float, end: float) -> str:
     return "https://calendar.google.com/calendar/render?" + urllib.parse.urlencode({"action": "TEMPLATE", "text": title, "dates": dates, "details": "Scheduled by Auto-Planner"})
 
 
+def gcal_due_link(a: Assignment) -> str:
+    dates = f"{a.due:%Y%m%d}/{(a.due + dt.timedelta(days=1)):%Y%m%d}"
+    return "https://calendar.google.com/calendar/render?" + urllib.parse.urlencode({
+        "action": "TEMPLATE",
+        "text": f"DUE: {a.title}",
+        "dates": dates,
+        "details": f"{a.title} is due. Course: {a.course}. Scheduled by Auto-Planner.",
+    })
+
+
 def render_overload_banner() -> None:
     over = unscheduled_titles()
     if over:
@@ -865,6 +877,10 @@ def render_assignment_card(a: Assignment, score: int | None = None, compact: boo
     cls, lbl = ("hi", "Overdue") if days < 0 else pri_label(score if score is not None else priority_score(a))
     status = assignment_status(a)
     progress = "" if compact else f"<div class='mini-progress'><span style='width:{pct}%'></span></div>"
+    calendar_link = "" if compact else (
+        f"<div class='assignment-links'><a href='{html.escape(gcal_due_link(a), quote=True)}' "
+        f"target='_blank' rel='noopener'>Add due date to Google Calendar</a></div>"
+    )
     st.markdown(
         f"""<div class="assignment-card">
         <div class="assignment-head">
@@ -876,7 +892,7 @@ def render_assignment_card(a: Assignment, score: int | None = None, compact: boo
             <span class="pill {cls}">{lbl}</span>
             <span class="pill {status_class(status)}">{status}</span>
           </div>
-        </div>{progress}</div>""",
+        </div>{progress}{calendar_link}</div>""",
         unsafe_allow_html=True,
     )
 

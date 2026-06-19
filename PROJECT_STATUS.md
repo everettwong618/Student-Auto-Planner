@@ -61,6 +61,8 @@ again editable UTF-8 source and compiles successfully.
   full-width missed/reschedule action on today's blocks.
 - Study block cards include an "Add to Google Calendar" link for quickly copying
   an individual block into Google Calendar.
+- Full assignment cards include an "Add due date to Google Calendar" link for
+  quickly copying deadlines into Google Calendar.
 - Cleaner assignment cards on Dashboard and Assignments with responsive badges,
   due timing, and task progress bars.
 - Reminders page groups active work into Overdue, Due today, and Next 3 days,
