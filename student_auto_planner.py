@@ -1796,11 +1796,22 @@ def page_tasks() -> None:
                 a.title, a.course, a.due, a.hours, a.diff, a.weight = title or a.title, course or "General", due, hours, diff, weight
                 generate_plan()
                 st.rerun()
-            if ecol2.button("Delete", key=f"delete-{a.id}", use_container_width=True):
-                push_undo("delete assignment")
-                st.session_state.backup = snapshot()
-                st.session_state.assignments = [x for x in st.session_state.assignments if x.id != a.id]
-                generate_plan()
+            delete_key = f"confirm_delete_assignment_{a.id}"
+            if st.session_state.get(delete_key):
+                st.warning("Delete this assignment and its study blocks?")
+                d1, d2 = st.columns(2)
+                if d1.button("Yes, delete", key=f"delete-yes-{a.id}", use_container_width=True):
+                    push_undo("delete assignment")
+                    st.session_state.backup = snapshot()
+                    st.session_state.assignments = [x for x in st.session_state.assignments if x.id != a.id]
+                    st.session_state[delete_key] = False
+                    generate_plan()
+                    st.rerun()
+                if d2.button("Cancel", key=f"delete-no-{a.id}", use_container_width=True):
+                    st.session_state[delete_key] = False
+                    st.rerun()
+            elif ecol2.button("Delete", key=f"delete-{a.id}", use_container_width=True):
+                st.session_state[delete_key] = True
                 st.rerun()
         for t in visible:
             checked = st.checkbox(f"{t.title} - ~{t.hours:g}h", value=t.done, key=f"task-{t.id}")

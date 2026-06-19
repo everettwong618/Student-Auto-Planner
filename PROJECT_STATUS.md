@@ -27,6 +27,8 @@ again editable UTF-8 source and compiles successfully.
   do not need the sidebar for planner data management.
 - Clearing the whole calendar now requires a confirmation step before deleting
   assignments, commitments, and generated blocks.
+- Deleting a single assignment now requires confirmation inside the edit popover
+  to prevent accidental taps on mobile.
 - One-tap "Missed? Reschedule" on today's study blocks.
 - Loud overload banner when work cannot fit before deadlines.
 - Friendlier CSV/ICS import errors.
