@@ -26,10 +26,22 @@ again editable UTF-8 source and compiles successfully.
 - One-tap "Missed? Reschedule" on today's study blocks.
 - Loud overload banner when work cannot fit before deadlines.
 - Friendlier CSV/ICS import errors.
+- Top-level Calendar Sync page for Canvas, Google Calendar, Outlook, iCal, and
+  `webcal://` links. Saved feeds can refresh automatically once per app session
+  and can be refreshed manually from the Calendar Sync page.
+- Feed-created assignments track their source/event ID so refreshed calendar
+  events update instead of duplicating.
 - `.ics` export for generated study blocks and all assignment due dates.
 - Mobile-friendly Quick jump navigation.
+- Mobile action bar for Today, Calendar, Add, and Plan so phone users do not need
+  the sidebar for common navigation.
+- Mobile action bar includes a Sync shortcut so students do not need the sidebar
+  to connect calendar feeds.
 - Larger touch targets and custom Inter-based styling.
 - Warm off-white/teal/indigo theme in `.streamlit/config.toml`.
+- Polished dashboard stat cards and a quick-add assignment panel.
+- Compact phone-friendly month grid with persistent Agenda/Month view state and
+  visible due/study/fixed color legend.
 - PWA manifest/icons for iPhone Home Screen install.
 - Safer testing launchers:
   - `Start Auto-Planner.bat` for computer-only local testing.
@@ -45,7 +57,7 @@ Core behavior:
 - Let a student add assignments with due dates, effort, difficulty, importance,
   and status.
 - Import assignments from pasted text, `.ics` calendar files, calendar feed URLs,
-  and CSV files.
+  saved calendar feed URLs, and CSV files.
 - Score work by urgency, importance, effort, and difficulty.
 - Break large assignments into smaller study tasks.
 - Schedule study blocks into free time around fixed commitments and meal breaks
@@ -63,6 +75,10 @@ Core behavior:
   helps while Streamlit session state remains alive.
 - Real-world feed testing should still be done with live Canvas, Google Calendar,
   and Outlook feeds.
+- Direct private iPhone/Apple Calendar sync is not built yet. The current path is
+  connecting a shareable/subscribed iCloud/Google/Outlook/Canvas iCal feed URL.
+- Swipe-to-open sidebar is not reliable in Streamlit on iPhone; the app should
+  rely on visible Quick jump/action-bar navigation instead.
 - Native App Store app is not built; current mobile install is a Home Screen web
   app.
 - Streamlit Community Cloud deployment and multi-account smoke testing still need

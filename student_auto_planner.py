@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import calendar
 import datetime as dt
+import hashlib
 import html
 import json
 import re
@@ -36,11 +37,12 @@ TEXT = "#28251d"
 DANGER = "#d94b4b"
 AMBER = "#b7791f"
 SUCCESS = "#2f855a"
+FIXED_DOT = "#5b5563"
 COLORS = [BRAND, ACCENT, AMBER, DANGER, "#7c5cff", SUCCESS]
 KIND_COLORS = {"class": BRAND, "work": TEXT, "club": "#7c5cff", "meal": SUCCESS}
 KIND_LABELS = {"class": "Class", "work": "Work", "club": "Club", "meal": "Meal"}
 STATUSES = ["Not Started", "In Progress", "Done"]
-PAGES = ["Dashboard", "Schedule", "Calendar", "Assignments", "Import", "Study Plan", "Reminders", "Progress", "Account"]
+PAGES = ["Dashboard", "Schedule", "Calendar", "Calendar Sync", "Assignments", "Import", "Study Plan", "Reminders", "Progress", "Account"]
 DEFAULT_MEALS = [(8.0, 8.5, "Breakfast"), (12.0, 13.0, "Lunch"), (18.0, 19.0, "Dinner")]
 
 
@@ -64,6 +66,8 @@ class Assignment:
     color: str
     weight: int = 3
     status: str = "Not Started"
+    source: str = ""
+    external_id: str = ""
 
 
 @dataclass
@@ -115,6 +119,35 @@ def inject_ui() -> None:
         link("manifest", "/app/static/manifest.webmanifest");
         link("icon", "/app/static/icon-192.png", {type: "image/png"});
         link("apple-touch-icon", "/app/static/icon-180.png");
+        if (!window.__autoPlannerSwipeNav) {
+          window.__autoPlannerSwipeNav = true;
+          let startX = 0, startY = 0;
+          function clickFirst(selectors) {
+            for (const selector of selectors) {
+              const el = window.parent.document.querySelector(selector);
+              if (el) { el.click(); return true; }
+            }
+            return false;
+          }
+          window.parent.document.addEventListener("touchstart", (event) => {
+            const t = event.touches && event.touches[0];
+            if (!t) return;
+            startX = t.clientX; startY = t.clientY;
+          }, {passive:true});
+          window.parent.document.addEventListener("touchend", (event) => {
+            const t = event.changedTouches && event.changedTouches[0];
+            if (!t) return;
+            const dx = t.clientX - startX;
+            const dy = Math.abs(t.clientY - startY);
+            if (dy > 70 || Math.abs(dx) < 70) return;
+            if (startX < 28 && dx > 0) {
+              clickFirst(['[data-testid="collapsedControl"] button', '[data-testid="collapsedControl"]']);
+            }
+            if (dx < 0) {
+              clickFirst(['[data-testid="stSidebarCollapseButton"] button', '[data-testid="stSidebarCollapseButton"]']);
+            }
+          }, {passive:true});
+        }
         </script>
         """,
         unsafe_allow_javascript=True,
@@ -140,6 +173,14 @@ def inject_ui() -> None:
         .muted {color:#5f5a4d;} .faint {color:#837d70;font-size:12px;}
         .danger-banner {background:#fff1f1;border:1px solid rgba(217,75,75,.32);border-left:6px solid #d94b4b;border-radius:12px;padding:14px 16px;margin:12px 0;box-shadow:0 6px 18px rgba(217,75,75,.08);}
         .empty-note {background:#fbfaf7;border:1px dashed rgba(40,37,29,.18);border-radius:12px;padding:16px;margin:10px 0;color:#5f5a4d;}
+        .mobile-actions {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:8px 0 14px;}
+        .mobile-action {background:white;border:1px solid rgba(40,37,29,.08);border-radius:12px;min-height:50px;padding:8px 6px;text-align:center;box-shadow:0 4px 12px rgba(40,37,29,.05);}
+        .mobile-action b {display:block;font-size:13px;color:#28251d;}
+        .mobile-action span {font-size:11px;color:#837d70;}
+        .stat-grid {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:12px 0;}
+        .stat-card {background:white;border:1px solid rgba(40,37,29,.08);border-radius:12px;padding:12px;box-shadow:0 4px 12px rgba(40,37,29,.05);}
+        .stat-card b {font-size:20px;color:#28251d;}
+        .stat-card span {display:block;font-size:12px;color:#837d70;margin-top:2px;}
         .stButton>button, .stDownloadButton>button, .stForm button, [role="tab"] {min-height:44px;border-radius:10px;}
         input, textarea, select {font-size:16px !important;}
         .stProgress > div > div > div {background:#01696f;}
@@ -158,6 +199,7 @@ def inject_ui() -> None:
           .hero {padding:16px;border-radius:12px;}
           .hero .b {font-size:24px;}
           .card {padding:13px 14px;}
+          .stat-grid {grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
           table.cal td {height:40px;}
           table.cal .dnum {font-size:11px;}
           table.cal .dot {width:5px;height:5px;}
@@ -493,6 +535,8 @@ def seed_state() -> None:
         Assignment(3, "CS Project", "CS 201", _d(6), 6, 3, COLORS[0], 4),
     ]
     st.session_state.task_done_ids = []
+    st.session_state.feed_sources = []
+    st.session_state.feed_auto_refresh = True
     generate_plan()
 
 
@@ -507,6 +551,8 @@ def snapshot() -> dict:
         "fixed": [asdict(f) for f in st.session_state.fixed],
         "assignments": [{**asdict(a), "due": a.due.isoformat()} for a in st.session_state.assignments],
         "task_done_ids": st.session_state.get("task_done_ids", []),
+        "feed_sources": st.session_state.get("feed_sources", []),
+        "feed_auto_refresh": st.session_state.get("feed_auto_refresh", True),
     }
 
 
@@ -526,6 +572,8 @@ def restore_snapshot(snap: dict) -> None:
         data.setdefault("status", "Not Started")
         st.session_state.assignments.append(Assignment(**data))
     st.session_state.task_done_ids = [int(x) for x in snap.get("task_done_ids", [])]
+    st.session_state.feed_sources = snap.get("feed_sources", [])
+    st.session_state.feed_auto_refresh = snap.get("feed_auto_refresh", True)
     generate_plan()
 
 
@@ -607,6 +655,8 @@ def init_state() -> None:
     st.session_state.setdefault("active_page", PAGES[0])
     st.session_state.setdefault("sidebar_page", st.session_state.active_page)
     st.session_state.setdefault("top_page", st.session_state.active_page)
+    st.session_state.setdefault("feed_sources", [])
+    st.session_state.setdefault("feed_auto_refresh", True)
 
     if st.session_state.get("auth"):
         uid = st.session_state.auth["id"]
@@ -633,6 +683,35 @@ def sync_page_from_sidebar() -> None:
 def sync_page_from_top() -> None:
     st.session_state.active_page = st.session_state.top_page
     st.session_state.sidebar_page = st.session_state.active_page
+
+
+def go_page(page: str) -> None:
+    st.session_state.active_page = page
+    st.session_state.sidebar_page = page
+    st.session_state.top_page = page
+    st.rerun()
+
+
+def render_action_bar() -> None:
+    actions = [
+        ("Dashboard", "Today", "focus"),
+        ("Calendar", "Calendar", "month"),
+        ("Calendar Sync", "Sync", "feeds"),
+        ("Study Plan", "Plan", "30 days"),
+    ]
+    st.markdown(
+        "<div class='mobile-actions'>"
+        + "".join(
+            f"<div class='mobile-action'><b>{html.escape(label)}</b><span>{html.escape(sub)}</span></div>"
+            for _, label, sub in actions
+        )
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+    cols = st.columns(4)
+    for col, (page, label, _) in zip(cols, actions):
+        if col.button(label, key=f"action-{page}", use_container_width=True):
+            go_page(page)
 
 
 def login_gate() -> None:
@@ -884,9 +963,24 @@ def page_dashboard() -> None:
     done = sum(1 for b in blocks if any(t.id == b.task_id and t.done for t in st.session_state.tasks))
     planned = sum(b.end - b.start for b in blocks)
     total = len(blocks)
+    due_week = sum(1 for a in st.session_state.assignments if 0 <= (a.due - TODAY).days <= 7)
+    all_tasks = len(st.session_state.tasks)
+    done_tasks = sum(t.done for t in st.session_state.tasks)
+    plan_pct = round(done_tasks / all_tasks * 100) if all_tasks else 0
     st.markdown(f"""<div class="hero"><div class="k">Today's focus</div><div class="b">{done}/{total} tasks done</div><div class="s">{planned:g}h planned today · {compute_streak()} day streak</div></div>""", unsafe_allow_html=True)
     st.progress(done / total if total else 0)
+    st.markdown(
+        f"""<div class="stat-grid">
+        <div class="stat-card"><b>{planned:g}h</b><span>planned today</span></div>
+        <div class="stat-card"><b>{due_week}</b><span>due this week</span></div>
+        <div class="stat-card"><b>{plan_pct}%</b><span>plan complete</span></div>
+        <div class="stat-card"><b>{compute_streak()}d</b><span>study streak</span></div>
+        </div>""",
+        unsafe_allow_html=True,
+    )
     render_overload_banner()
+    with st.expander("Quick add assignment"):
+        add_assignment_form("dash")
     left, right = st.columns([0.58, 0.42])
     with left:
         st.markdown("#### Today")
@@ -964,7 +1058,7 @@ def render_month_grid(month_start: dt.date, selected: dt.date) -> str:
             items = calendar_items(d)
             dots = ""
             for color, n in ((DANGER, len(items["due"])), (BRAND, len(items["study"])),
-                             (TEXT, len(items["fixed"]))):
+                             (FIXED_DOT, len(items["fixed"]))):
                 dots += f"<span class='dot' style='background:{color}'></span>" * min(n, 4)
             cls = " ".join(c for c, on in (("today", d == TODAY), ("sel", d == selected)) if on)
             cells += (f"<td class='{cls}'><div class='dnum'>{num}</div>"
@@ -975,6 +1069,8 @@ def render_month_grid(month_start: dt.date, selected: dt.date) -> str:
 
 def page_calendar() -> None:
     st.markdown("### Calendar")
+    if st.button("Connect calendars / sync feeds", use_container_width=True, key="calendar-open-sync"):
+        go_page("Calendar Sync")
     offset = max(0, min(CALENDAR_MONTHS - 1, int(st.session_state.get("calendar_month_offset", 0))))
     month_start = add_months(TODAY.replace(day=1), offset)
     c1, c2, c3, c4 = st.columns([.18, .44, .18, .20])
@@ -1023,7 +1119,7 @@ def page_calendar() -> None:
         f"<div class='faint' style='margin:2px 0 6px'>"
         f"<span style='color:{DANGER};font-size:15px'>●</span> due &nbsp;&nbsp;"
         f"<span style='color:{BRAND};font-size:15px'>●</span> study &nbsp;&nbsp;"
-        f"<span style='color:{TEXT};font-size:15px'>●</span> class / work / club</div>",
+        f"<span style='color:{FIXED_DOT};font-size:15px'>●</span> class / work / club</div>",
         unsafe_allow_html=True)
     last_day = calendar.monthrange(month_start.year, month_start.month)[1]
     picked = st.date_input(
@@ -1046,10 +1142,19 @@ def course_from(text: str) -> str:
     return f"{m.group(1)} {m.group(2)}" if m else "General"
 
 
-def candidate(title: str, due: dt.date, course: str = "") -> dict:
+def candidate(title: str, due: dt.date, course: str = "", source: str = "", external_id: str = "") -> dict:
     kind = detect_type(title, course)
     weight, hours, diff = TYPE_DEFAULTS[kind]
-    return {"title": title.strip()[:90] or "Untitled assignment", "course": course or course_from(title), "due": due, "hours": hours, "diff": diff, "weight": weight}
+    return {
+        "title": title.strip()[:90] or "Untitled assignment",
+        "course": course or course_from(title),
+        "due": due,
+        "hours": hours,
+        "diff": diff,
+        "weight": weight,
+        "source": source,
+        "external_id": external_id,
+    }
 
 
 def parse_text(text: str) -> list[dict]:
@@ -1070,7 +1175,7 @@ def parse_text(text: str) -> list[dict]:
     return out
 
 
-def parse_ics(data) -> list[dict]:
+def parse_ics(data, source: str = "") -> list[dict]:
     from icalendar import Calendar
     if isinstance(data, bytes):
         data = data.decode("utf-8", "ignore")
@@ -1087,7 +1192,9 @@ def parse_ics(data) -> list[dict]:
         value = start.dt
         due = value.date() if isinstance(value, dt.datetime) else value
         if isinstance(due, dt.date):
-            out.append(candidate(summary, due, course_from(summary)))
+            uid = str(event.get("UID", "")).strip()
+            external_id = uid or hashlib.sha1(f"{summary}|{due.isoformat()}".encode("utf-8")).hexdigest()
+            out.append(candidate(summary, due, course_from(summary), source, external_id))
     return out
 
 
@@ -1101,6 +1208,105 @@ def fetch_feed(url: str) -> str:
     response = requests.get(url, timeout=15)
     response.raise_for_status()
     return response.text
+
+
+def feed_key(source_name: str, external_id: str) -> tuple[str, str]:
+    return source_name.strip().lower(), external_id.strip()
+
+
+def sync_feed_source(source: dict) -> dict:
+    """Fetch one saved ICS feed and upsert its events into assignments."""
+    name = (source.get("name") or "Calendar feed").strip()
+    url = (source.get("url") or "").strip()
+    if not url:
+        raise ValueError("Missing feed URL.")
+
+    parsed = parse_ics(fetch_feed(url), source=name)
+    existing = {
+        feed_key(a.source, a.external_id): a
+        for a in st.session_state.assignments
+        if getattr(a, "source", "") and getattr(a, "external_id", "")
+    }
+
+    added = 0
+    updated = 0
+    for row in parsed:
+        external_id = row.get("external_id") or hashlib.sha1(
+            f"{name}|{row['title']}|{row['due'].isoformat()}".encode("utf-8")
+        ).hexdigest()
+        key = feed_key(name, external_id)
+        if key in existing:
+            a = existing[key]
+            changed = (
+                a.title != row["title"]
+                or a.course != row["course"]
+                or a.due != row["due"]
+            )
+            a.title = row["title"]
+            a.course = row["course"]
+            a.due = row["due"]
+            a.source = name
+            a.external_id = external_id
+            if changed:
+                updated += 1
+        else:
+            st.session_state.next_id += 1
+            st.session_state.assignments.append(
+                Assignment(
+                    st.session_state.next_id,
+                    row["title"],
+                    row.get("course") or "General",
+                    row["due"],
+                    float(row.get("hours") or 3),
+                    int(row.get("diff") or 2),
+                    COLORS[len(st.session_state.assignments) % len(COLORS)],
+                    int(row.get("weight") or 3),
+                    source=name,
+                    external_id=external_id,
+                )
+            )
+            added += 1
+
+    source["last_sync"] = dt.datetime.now(dt.timezone.utc).isoformat()
+    source["last_count"] = len(parsed)
+    source["last_error"] = ""
+    generate_plan()
+    return {"added": added, "updated": updated, "seen": len(parsed)}
+
+
+def refresh_connected_feeds(force: bool = False) -> dict:
+    """Refresh saved feeds once per app session, or on demand."""
+    sources = st.session_state.get("feed_sources", [])
+    if not sources:
+        return {"added": 0, "updated": 0, "errors": 0}
+    if not force and st.session_state.get("_feeds_refreshed_this_session"):
+        return {"added": 0, "updated": 0, "errors": 0}
+
+    totals = {"added": 0, "updated": 0, "errors": 0}
+    for source in sources:
+        try:
+            result = sync_feed_source(source)
+            totals["added"] += result["added"]
+            totals["updated"] += result["updated"]
+        except Exception as exc:
+            source["last_error"] = str(exc)
+            totals["errors"] += 1
+    st.session_state._feeds_refreshed_this_session = True
+    return totals
+
+
+def maybe_auto_refresh_feeds() -> None:
+    if not st.session_state.get("feed_auto_refresh", True):
+        return
+    if not st.session_state.get("feed_sources"):
+        return
+    if st.session_state.get("_feeds_refreshed_this_session"):
+        return
+    totals = refresh_connected_feeds(force=False)
+    if totals["added"] or totals["updated"]:
+        st.toast(
+            f"Calendar feeds updated: {totals['added']} added, {totals['updated']} changed."
+        )
 
 
 def parse_csv(file) -> list[dict]:
@@ -1135,7 +1341,20 @@ def commit_import(rows: list[dict]) -> int:
     count = 0
     for row in rows:
         st.session_state.next_id += 1
-        st.session_state.assignments.append(Assignment(st.session_state.next_id, str(row["title"]), str(row.get("course") or "General"), row["due"], float(row.get("hours") or 3), int(row.get("diff") or 2), COLORS[len(st.session_state.assignments) % len(COLORS)], int(row.get("weight") or 3)))
+        st.session_state.assignments.append(
+            Assignment(
+                st.session_state.next_id,
+                str(row["title"]),
+                str(row.get("course") or "General"),
+                row["due"],
+                float(row.get("hours") or 3),
+                int(row.get("diff") or 2),
+                COLORS[len(st.session_state.assignments) % len(COLORS)],
+                int(row.get("weight") or 3),
+                source=str(row.get("source") or ""),
+                external_id=str(row.get("external_id") or ""),
+            )
+        )
         count += 1
     generate_plan()
     return count
@@ -1143,8 +1362,15 @@ def commit_import(rows: list[dict]) -> int:
 
 def page_import() -> None:
     st.markdown("### Import assignments")
+    st.markdown(
+        """<div class="card"><b>Want automatic updates?</b>
+        <div class="faint">Use Calendar Sync to connect Canvas, Google, Outlook, iCal, or webcal feeds once and refresh them later.</div></div>""",
+        unsafe_allow_html=True,
+    )
+    if st.button("Open Calendar Sync", type="primary", use_container_width=True, key="import-open-calendar-sync"):
+        go_page("Calendar Sync")
     found = None
-    t1, t2, t3, t4 = st.tabs(["Paste text", "Upload .ics", "Calendar feed", "Upload CSV"])
+    t1, t2, t3, t4, t5 = st.tabs(["Paste text", "Upload .ics", "Connect feed", "Upload CSV", "Connected"])
     with t1:
         text = st.text_area("Paste syllabus text", height=160)
         if st.button("Detect due dates", use_container_width=True):
@@ -1159,14 +1385,37 @@ def page_import() -> None:
             except Exception as exc:
                 st.error(str(exc))
     with t3:
-        url = st.text_input("Feed URL")
-        if st.button("Fetch feed", use_container_width=True):
+        st.caption("Use Canvas Calendar Feed, Google Calendar secret iCal URL, Outlook published ICS, or any webcal link.")
+        feed_name = st.text_input("Feed name", placeholder="Canvas / School Calendar")
+        url = st.text_input("Feed URL", placeholder="https://...ics or webcal://...")
+        c1, c2 = st.columns(2)
+        if c1.button("Preview feed", use_container_width=True):
             try:
-                found = parse_ics(fetch_feed(url))
+                found = parse_ics(fetch_feed(url), source=feed_name or "Calendar feed")
                 if not found:
                     st.warning("Feed loaded, but no dated events were found.")
             except Exception as exc:
                 st.error(f"Could not fetch that feed: {exc}")
+        if c2.button("Save and sync", type="primary", use_container_width=True):
+            if not url.strip():
+                st.warning("Paste a feed URL first.")
+            else:
+                push_undo("connect calendar feed")
+                source = {
+                    "name": feed_name.strip() or "Calendar feed",
+                    "url": url.strip(),
+                    "last_sync": "",
+                    "last_count": 0,
+                    "last_error": "",
+                }
+                st.session_state.feed_sources.append(source)
+                try:
+                    result = sync_feed_source(source)
+                    st.success(f"Connected. Added {result['added']} and updated {result['updated']} assignment(s).")
+                except Exception as exc:
+                    source["last_error"] = str(exc)
+                    st.error(f"Saved the feed, but could not sync yet: {exc}")
+                st.rerun()
     with t4:
         csv = st.file_uploader("Upload CSV", type=["csv"])
         if csv:
@@ -1174,18 +1423,163 @@ def page_import() -> None:
                 found = parse_csv(csv)
             except Exception as exc:
                 st.error(str(exc))
+    with t5:
+        st.caption("Saved feeds refresh once when the app opens, and anytime you tap Refresh all.")
+        st.session_state.feed_auto_refresh = st.checkbox(
+            "Refresh connected feeds when the app opens",
+            value=st.session_state.get("feed_auto_refresh", True),
+        )
+        sources = st.session_state.get("feed_sources", [])
+        if not sources:
+            st.info("No connected feeds yet. Add one from the Connect feed tab.")
+        else:
+            if st.button("Refresh all feeds now", type="primary", use_container_width=True):
+                push_undo("refresh calendar feeds")
+                totals = refresh_connected_feeds(force=True)
+                st.toast(
+                    f"Feeds refreshed: {totals['added']} added, "
+                    f"{totals['updated']} updated, {totals['errors']} error(s)."
+                )
+                st.rerun()
+            for idx, source in enumerate(list(sources)):
+                last = source.get("last_sync") or "Never"
+                if last != "Never":
+                    try:
+                        last = dt.datetime.fromisoformat(last).strftime("%b %d, %I:%M %p").replace(" 0", " ")
+                    except Exception:
+                        pass
+                st.markdown(
+                    f"""<div class="card"><b>{html.escape(source.get('name', 'Calendar feed'))}</b>
+                    <div class="faint">{html.escape(source.get('url', ''))}</div>
+                    <div class="faint">Last sync: {html.escape(str(last))} · events seen: {source.get('last_count', 0)}</div>
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+                if source.get("last_error"):
+                    st.warning(source["last_error"])
+                if st.button("Remove feed", key=f"remove-feed-{idx}", use_container_width=True):
+                    push_undo("remove calendar feed")
+                    st.session_state.feed_sources.pop(idx)
+                    st.rerun()
     if found is not None:
         st.session_state.import_candidates = found
     cands = st.session_state.get("import_candidates")
     if cands:
         st.markdown("#### Review and import")
-        df = pd.DataFrame([{"Import": True, "Title": c["title"], "Course": c["course"], "Due": c["due"], "Hours": c["hours"], "Difficulty": c["diff"], "Importance": c["weight"]} for c in cands])
+        df = pd.DataFrame([{
+            "Import": True,
+            "Title": c["title"],
+            "Course": c["course"],
+            "Due": c["due"],
+            "Hours": c["hours"],
+            "Difficulty": c["diff"],
+            "Importance": c["weight"],
+            "Source": c.get("source", ""),
+            "External ID": c.get("external_id", ""),
+        } for c in cands])
         edited = st.data_editor(df, hide_index=True, use_container_width=True)
         chosen = edited[edited["Import"]]
         if st.button(f"Import {len(chosen)} selected", type="primary", use_container_width=True, disabled=len(chosen) == 0):
-            rows = [{"title": r.Title, "course": r.Course, "due": r.Due if isinstance(r.Due, dt.date) else pd.to_datetime(r.Due).date(), "hours": r.Hours, "diff": r.Difficulty, "weight": r.Importance} for r in chosen.itertuples()]
+            rows = [{
+                "title": row["Title"],
+                "course": row["Course"],
+                "due": row["Due"] if isinstance(row["Due"], dt.date) else pd.to_datetime(row["Due"]).date(),
+                "hours": row["Hours"],
+                "diff": row["Difficulty"],
+                "weight": row["Importance"],
+                "source": row.get("Source", ""),
+                "external_id": row.get("External ID", ""),
+            } for row in chosen.to_dict("records")]
             commit_import(rows)
             st.session_state.import_candidates = None
+            st.rerun()
+
+
+def page_calendar_sync() -> None:
+    st.markdown("### Calendar Sync")
+    st.markdown(
+        """<div class="card"><b>Connect your school calendars once.</b>
+        <div class="faint">Canvas, Google Calendar, Outlook, iCloud/iCal, and webcal links can refresh into Auto-Planner automatically.</div></div>""",
+        unsafe_allow_html=True,
+    )
+
+    with st.expander("What link do I paste here?", expanded=False):
+        st.markdown(
+            "- **Canvas:** Calendar → Calendar Feed → copy the feed link.\n"
+            "- **Google Calendar:** Calendar settings → Secret address in iCal format.\n"
+            "- **Outlook:** Calendar sharing/publish settings → ICS link.\n"
+            "- **iPhone / iCloud Calendar:** use a public/shared iCal subscription link if available. Direct private Apple Calendar access needs a separate Apple integration."
+        )
+
+    with st.form("calendar-sync-form", clear_on_submit=True):
+        feed_name = st.text_input("Calendar name", placeholder="Canvas / School Calendar")
+        feed_url = st.text_input("Calendar feed URL", placeholder="https://...ics or webcal://...")
+        submitted = st.form_submit_button("Connect and sync", type="primary", use_container_width=True)
+
+    if submitted:
+        if not feed_url.strip():
+            st.warning("Paste a calendar feed URL first.")
+        else:
+            push_undo("connect calendar feed")
+            source = {
+                "name": feed_name.strip() or "Calendar feed",
+                "url": feed_url.strip(),
+                "last_sync": "",
+                "last_count": 0,
+                "last_error": "",
+            }
+            st.session_state.feed_sources.append(source)
+            try:
+                result = sync_feed_source(source)
+                st.success(
+                    f"Connected. Added {result['added']} and updated {result['updated']} assignment(s)."
+                )
+            except Exception as exc:
+                source["last_error"] = str(exc)
+                st.error(f"Saved the feed, but could not sync yet: {exc}")
+            st.rerun()
+
+    st.divider()
+    st.markdown("#### Connected calendars")
+    st.session_state.feed_auto_refresh = st.checkbox(
+        "Refresh connected feeds when the app opens",
+        value=st.session_state.get("feed_auto_refresh", True),
+        key="sync-auto-refresh",
+    )
+
+    sources = st.session_state.get("feed_sources", [])
+    if not sources:
+        st.info("No calendars connected yet.")
+        return
+
+    if st.button("Refresh all feeds now", type="primary", use_container_width=True, key="sync-refresh-all"):
+        push_undo("refresh calendar feeds")
+        totals = refresh_connected_feeds(force=True)
+        st.toast(
+            f"Feeds refreshed: {totals['added']} added, "
+            f"{totals['updated']} updated, {totals['errors']} error(s)."
+        )
+        st.rerun()
+
+    for idx, source in enumerate(list(sources)):
+        last = source.get("last_sync") or "Never"
+        if last != "Never":
+            try:
+                last = dt.datetime.fromisoformat(last).strftime("%b %d, %I:%M %p").replace(" 0", " ")
+            except Exception:
+                pass
+        st.markdown(
+            f"""<div class="card"><b>{html.escape(source.get('name', 'Calendar feed'))}</b>
+            <div class="faint">{html.escape(source.get('url', ''))}</div>
+            <div class="faint">Last sync: {html.escape(str(last))} · events seen: {source.get('last_count', 0)}</div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+        if source.get("last_error"):
+            st.warning(source["last_error"])
+        if st.button("Remove feed", key=f"sync-remove-feed-{idx}", use_container_width=True):
+            push_undo("remove calendar feed")
+            st.session_state.feed_sources.pop(idx)
             st.rerun()
 
 
@@ -1313,13 +1707,16 @@ def page_account() -> None:
 
 
 sidebar()
+maybe_auto_refresh_feeds()
 st.session_state.top_page = st.session_state.active_page
 st.selectbox("Quick jump", PAGES, key="top_page", on_change=sync_page_from_top)
+render_action_bar()
 
 ROUTES = {
     "Dashboard": page_dashboard,
     "Schedule": page_schedule,
     "Calendar": page_calendar,
+    "Calendar Sync": page_calendar_sync,
     "Assignments": page_tasks,
     "Import": page_import,
     "Study Plan": page_plan,
