@@ -521,6 +521,14 @@ def add_months(base: dt.date, months: int) -> dt.date:
 
 
 def init_state() -> None:
+    # Shared UI state — must exist for BOTH guests and signed-in users
+    # (sidebar()/pages read these every run).
+    st.session_state.setdefault("calendar_month_offset", 0)
+    st.session_state.setdefault("calendar_selected_date", TODAY)
+    st.session_state.setdefault("active_page", PAGES[0])
+    st.session_state.setdefault("sidebar_page", st.session_state.active_page)
+    st.session_state.setdefault("top_page", st.session_state.active_page)
+
     if st.session_state.get("auth"):
         uid = st.session_state.auth["id"]
         if st.session_state.get("_loaded_uid") != uid:
@@ -536,11 +544,6 @@ def init_state() -> None:
         return
     if "assignments" not in st.session_state:
         seed_state()
-    st.session_state.setdefault("calendar_month_offset", 0)
-    st.session_state.setdefault("calendar_selected_date", TODAY)
-    st.session_state.setdefault("active_page", PAGES[0])
-    st.session_state.setdefault("sidebar_page", st.session_state.active_page)
-    st.session_state.setdefault("top_page", st.session_state.active_page)
 
 
 def sync_page_from_sidebar() -> None:
