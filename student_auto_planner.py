@@ -144,10 +144,12 @@ def inject_ui() -> None:
         .muted {color:#5f5a4d;} .faint {color:#837d70;font-size:12px;}
         .danger-banner {background:#fff1f1;border:1px solid rgba(217,75,75,.32);border-left:6px solid #d94b4b;border-radius:12px;padding:14px 16px;margin:12px 0;box-shadow:0 6px 18px rgba(217,75,75,.08);}
         .empty-note {background:#fbfaf7;border:1px dashed rgba(40,37,29,.18);border-radius:12px;padding:16px;margin:10px 0;color:#5f5a4d;}
-        .mobile-actions {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:8px 0 14px;}
-        .mobile-action {background:white;border:1px solid rgba(40,37,29,.08);border-radius:12px;min-height:50px;padding:8px 6px;text-align:center;box-shadow:0 4px 12px rgba(40,37,29,.05);}
-        .mobile-action b {display:block;font-size:13px;color:#28251d;}
-        .mobile-action span {font-size:11px;color:#837d70;}
+        .quick-nav {display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin:8px 0 16px;}
+        .quick-nav a {background:white;border:1px solid rgba(40,37,29,.08);border-radius:12px;min-height:52px;padding:8px 6px;text-align:center;box-shadow:0 4px 12px rgba(40,37,29,.05);text-decoration:none;color:#28251d;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+        .quick-nav a.active {background:#e7f4ee;border-color:rgba(1,105,111,.28);box-shadow:0 6px 18px rgba(1,105,111,.10);}
+        .quick-nav .nav-icon {width:22px;height:22px;border-radius:8px;display:grid;place-items:center;background:#f4f1ea;color:#01696f;font-size:12px;font-weight:900;margin-bottom:3px;}
+        .quick-nav a.active .nav-icon {background:#01696f;color:white;}
+        .quick-nav b {display:block;font-size:12px;color:#28251d;line-height:1.05;}
         .stat-grid {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:12px 0;}
         .stat-card {background:white;border:1px solid rgba(40,37,29,.08);border-radius:12px;padding:12px;box-shadow:0 4px 12px rgba(40,37,29,.05);}
         .stat-card b {font-size:20px;color:#28251d;}
@@ -176,6 +178,8 @@ def inject_ui() -> None:
           .hero {padding:16px;border-radius:12px;}
           .hero .b {font-size:24px;}
           .card {padding:13px 14px;}
+          .quick-nav {grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;}
+          .quick-nav a {min-height:48px;border-radius:11px;padding:7px 5px;}
           .stat-grid {grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
           table.cal {border-spacing:3px;}
           table.cal td {height:39px;border-radius:8px;}
@@ -661,33 +665,51 @@ def init_state() -> None:
 
 def sync_page_from_sidebar() -> None:
     st.session_state.active_page = st.session_state.sidebar_page
+    st.query_params["page"] = st.session_state.active_page
 
 
 def sync_page_from_top() -> None:
     st.session_state.active_page = st.session_state.top_page
+    st.query_params["page"] = st.session_state.active_page
 
 
 def go_page(page: str) -> None:
     st.session_state.active_page = page
+    st.query_params["page"] = page
     st.rerun()
+
+
+def sync_page_from_query() -> None:
+    page = st.query_params.get("page")
+    if page in PAGES:
+        st.session_state.active_page = page
 
 
 def render_action_bar() -> None:
     actions = [
-        ("Dashboard", "Today"),
-        ("Calendar", "Calendar"),
-        ("Calendar Sync", "Sync"),
-        ("Study Plan", "Plan"),
+        ("Dashboard", "Today", "T"),
+        ("Schedule", "Week", "W"),
+        ("Calendar", "Calendar", "C"),
+        ("Assignments", "Add", "+"),
+        ("Calendar Sync", "Sync", "S"),
+        ("Study Plan", "Plan", "P"),
     ]
     st.markdown(
         """<div class="section-title" style="margin-top:4px">
         <div class="icon">Q</div><b>Quick actions</b></div>""",
         unsafe_allow_html=True,
     )
-    cols = st.columns(4)
-    for col, (page, label) in zip(cols, actions):
-        if col.button(label, key=f"action-{page}", use_container_width=True):
-            go_page(page)
+    links = []
+    active = st.session_state.get("active_page", "Dashboard")
+    for page, label, icon in actions:
+        cls = "active" if page == active else ""
+        href = f"?page={urllib.parse.quote(page)}"
+        links.append(
+            f"<a class='{cls}' href='{href}' target='_self'>"
+            f"<span class='nav-icon'>{html.escape(icon)}</span>"
+            f"<b>{html.escape(label)}</b></a>"
+        )
+    st.markdown(f"<div class='quick-nav'>{''.join(links)}</div>", unsafe_allow_html=True)
 
 
 def login_gate() -> None:
@@ -1745,6 +1767,7 @@ def page_account() -> None:
         st.rerun()
 
 
+sync_page_from_query()
 sidebar()
 maybe_auto_refresh_feeds()
 st.session_state.top_page = st.session_state.active_page

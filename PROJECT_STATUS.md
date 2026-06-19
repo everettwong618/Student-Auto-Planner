@@ -37,6 +37,8 @@ again editable UTF-8 source and compiles successfully.
   the sidebar for common navigation.
 - Mobile action bar includes a Sync shortcut so students do not need the sidebar
   to connect calendar feeds.
+- Compact quick-nav strip for Today, Week, Calendar, Add, Sync, and Plan with
+  URL-backed page links that work on mobile and desktop.
 - Larger touch targets and custom Inter-based styling.
 - Warm off-white/teal/indigo theme in `.streamlit/config.toml`.
 - Polished dashboard stat cards and a quick-add assignment panel.
