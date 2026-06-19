@@ -154,6 +154,10 @@ def inject_ui() -> None:
         .assignment-badges {display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;}
         .mini-progress {height:7px;background:#eeeae2;border-radius:999px;overflow:hidden;margin-top:10px;}
         .mini-progress span {display:block;height:100%;background:linear-gradient(90deg,#01696f,#4157c8);border-radius:999px;}
+        .page-head {background:linear-gradient(145deg,#ffffff,#fbfaf7);border:1px solid rgba(40,37,29,.08);border-left:5px solid #01696f;border-radius:12px;padding:14px 16px;margin:2px 0 14px;box-shadow:0 5px 16px rgba(40,37,29,.05);}
+        .page-head .eyebrow {font-size:11px;font-weight:800;color:#01696f;text-transform:uppercase;letter-spacing:.02em;}
+        .page-head .title {font-size:24px;font-weight:800;line-height:1.1;color:#28251d;margin-top:2px;}
+        .page-head .sub {font-size:13px;color:#5f5a4d;margin-top:4px;}
         .quick-nav {display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin:8px 0 16px;}
         .quick-nav a {background:white;border:1px solid rgba(40,37,29,.08);border-radius:12px;min-height:52px;padding:8px 6px;text-align:center;box-shadow:0 4px 12px rgba(40,37,29,.05);text-decoration:none;color:#28251d;display:flex;flex-direction:column;align-items:center;justify-content:center;}
         .quick-nav a.active {background:#e7f4ee;border-color:rgba(1,105,111,.28);box-shadow:0 6px 18px rgba(1,105,111,.10);}
@@ -192,6 +196,8 @@ def inject_ui() -> None:
           .assignment-card {padding:13px 14px;}
           .assignment-head {display:block;}
           .assignment-badges {justify-content:flex-start;margin-top:8px;}
+          .page-head {padding:13px 14px;margin-bottom:12px;}
+          .page-head .title {font-size:21px;}
           .quick-nav {grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;}
           .quick-nav a {min-height:48px;border-radius:11px;padding:7px 5px;}
           .stat-grid {grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
@@ -732,6 +738,17 @@ def render_action_bar() -> None:
     st.markdown(f"<div class='quick-nav'>{''.join(links)}</div>", unsafe_allow_html=True)
 
 
+def page_header(title: str, subtitle: str, eyebrow: str = "Auto-Planner") -> None:
+    st.markdown(
+        f"""<div class="page-head">
+        <div class="eyebrow">{html.escape(eyebrow)}</div>
+        <div class="title">{html.escape(title)}</div>
+        <div class="sub">{html.escape(subtitle)}</div>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+
+
 def login_gate() -> None:
     if st.session_state.get("auth") or st.session_state.get("guest"):
         return
@@ -1064,7 +1081,7 @@ def page_dashboard() -> None:
 
 
 def page_schedule() -> None:
-    st.markdown("### Schedule")
+    page_header("Schedule", "A quick 7-day look at study blocks, meals, classes, work, and clubs.", "Week view")
     choices = [TODAY + dt.timedelta(days=i) for i in range(7)]
     selected = st.selectbox("Day", choices, format_func=lambda d: f"{d:%a, %b %d}" + (" - Today" if d == TODAY else ""))
     items = [(f.start, "fixed", f) for f in st.session_state.fixed if f.day == DAYS[selected.weekday()]]
@@ -1163,7 +1180,7 @@ def render_month_grid(month_start: dt.date, selected: dt.date) -> str:
 
 
 def page_calendar() -> None:
-    st.markdown("### Calendar")
+    page_header("Calendar", "Browse the next 12 months and tap any day to see the plan.", "Month view")
     if st.button("Connect calendars / sync feeds", use_container_width=True, key="calendar-open-sync"):
         go_page("Calendar Sync")
     query_view = st.query_params.get("cal_view")
@@ -1477,7 +1494,7 @@ def commit_import(rows: list[dict]) -> int:
 
 
 def page_import() -> None:
-    st.markdown("### Import assignments")
+    page_header("Import assignments", "Bring in syllabus text, calendar files, CSVs, or connected calendar feeds.", "Setup")
     st.markdown(
         """<div class="card"><b>Want automatic updates?</b>
         <div class="faint">Use Calendar Sync to connect Canvas, Google, Outlook, iCal, or webcal feeds once and refresh them later.</div></div>""",
@@ -1629,7 +1646,7 @@ def page_import() -> None:
 
 
 def page_calendar_sync() -> None:
-    st.markdown("### Calendar Sync")
+    page_header("Calendar Sync", "Connect Canvas, Google Calendar, Outlook, iCal, or webcal feeds once.", "Connected calendars")
     st.markdown(
         """<div class="card"><b>Connect your school calendars once.</b>
         <div class="faint">Canvas, Google Calendar, Outlook, iCloud/iCal, and webcal links can refresh into Auto-Planner automatically.</div></div>""",
@@ -1638,9 +1655,9 @@ def page_calendar_sync() -> None:
 
     with st.expander("What link do I paste here?", expanded=False):
         st.markdown(
-            "- **Canvas:** Calendar → Calendar Feed → copy the feed link.\n"
-            "- **Google Calendar:** Calendar settings → Secret address in iCal format.\n"
-            "- **Outlook:** Calendar sharing/publish settings → ICS link.\n"
+            "- **Canvas:** Calendar -> Calendar Feed -> copy the feed link.\n"
+            "- **Google Calendar:** Calendar settings -> Secret address in iCal format.\n"
+            "- **Outlook:** Calendar sharing/publish settings -> ICS link.\n"
             "- **iPhone / iCloud Calendar:** use a public/shared iCal subscription link if available. Direct private Apple Calendar access needs a separate Apple integration."
         )
 
@@ -1717,7 +1734,7 @@ def page_calendar_sync() -> None:
 
 
 def page_tasks() -> None:
-    st.markdown("### Assignments")
+    page_header("Assignments", "Track deadlines, status, priority, and the smaller tasks inside each assignment.", "Work list")
     add_open = bool(st.session_state.pop("show_add_assignment", False))
     with st.expander("Add an assignment", expanded=add_open):
         add_assignment_form("main")
@@ -1768,7 +1785,7 @@ def page_tasks() -> None:
 
 
 def page_plan() -> None:
-    st.markdown("### Auto Study Plan")
+    page_header("Auto Study Plan", "Review the rolling 30-day study blocks Auto-Planner generated for you.", "Plan")
     total_h = sum(b.end - b.start for b in st.session_state.blocks)
     st.markdown(f"""<div class="card"><b>Generated for the next {HORIZON_DAYS} days</b><div class="faint">{len(st.session_state.blocks)} study blocks - {total_h:g} planned hours</div></div>""", unsafe_allow_html=True)
     render_overload_banner()
@@ -1789,7 +1806,7 @@ def page_plan() -> None:
 
 
 def page_reminders() -> None:
-    st.markdown("### Reminders")
+    page_header("Reminders", "See urgent deadlines and overload warnings before they sneak up.", "Focus")
     render_overload_banner()
     shown = False
     for a in sorted(st.session_state.assignments, key=lambda x: x.due):
@@ -1802,7 +1819,7 @@ def page_reminders() -> None:
 
 
 def page_progress() -> None:
-    st.markdown("### Progress")
+    page_header("Progress", "Watch completion, streaks, and study hours build over the week.", "Momentum")
     done = sum(t.done for t in st.session_state.tasks)
     total = len(st.session_state.tasks)
     pct = done / total if total else 0
@@ -1813,7 +1830,7 @@ def page_progress() -> None:
 
 
 def page_account() -> None:
-    st.markdown("### Account")
+    page_header("Account", "Manage sign-in and saving so your planner follows you.", "Settings")
     auth = st.session_state.get("auth")
     if not auth:
         st.info("You are in guest mode. Sign up to save your planner automatically.")
