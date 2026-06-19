@@ -169,11 +169,7 @@ def inject_ui() -> None:
         .section-title {display:flex;align-items:center;gap:10px;margin:16px 0 8px;}
         .section-title .icon {width:28px;height:28px;border-radius:9px;display:grid;place-items:center;background:#e7f4ee;color:#01696f;font-weight:900;}
         .section-title b {font-size:18px;}
-        .cal-weekdays {display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin-top:8px;}
-        .cal-weekday {text-align:center;color:#837d70;font-size:11px;font-weight:800;}
         div[data-testid="stHorizontalBlock"]:has(button[kind]) {gap:5px;}
-        .cal-dot-row {display:flex;justify-content:center;gap:2px;min-height:8px;margin:-7px 0 5px;}
-        .cal-mini-dot {width:5px;height:5px;border-radius:50%;display:inline-block;}
         .selected-day-note {background:linear-gradient(145deg,#ffffff,#f5fbf9);border:1px solid rgba(1,105,111,.16);border-left:5px solid #01696f;border-radius:12px;padding:12px 14px;margin:8px 0 12px;box-shadow:0 6px 18px rgba(1,105,111,.08);}
         @media (max-width: 700px) {
           .block-container {padding-left:.6rem;padding-right:.6rem;padding-top:.8rem;}
@@ -186,8 +182,6 @@ def inject_ui() -> None:
           table.cal a.day-link {min-height:39px;padding:4px 1px;}
           table.cal .dnum {font-size:11px;}
           table.cal .dot {width:5px;height:5px;}
-          .cal-weekdays {gap:3px;}
-          .cal-weekday {font-size:10px;}
         }
         </style>
         """,
@@ -803,7 +797,7 @@ def render_block(b: Block, today_view: bool = False) -> None:
         st.session_state.history[-1] = max(0, st.session_state.history[-1] + (0.3 if checked else -0.3))
         st.rerun()
     style = "text-decoration:line-through;opacity:.55" if task.done else ""
-    c2.markdown(f"""<div class="card" style="margin:0 0 8px;padding:12px 14px;{style}"><b style="border-left:4px solid {b.color};padding-left:8px">{html.escape(b.title)}</b><div class="faint">{html.escape(b.course)} · {fmt_time(b.start)}-{fmt_time(b.end)}</div></div>""", unsafe_allow_html=True)
+    c2.markdown(f"""<div class="card" style="margin:0 0 8px;padding:12px 14px;{style}"><b style="border-left:4px solid {b.color};padding-left:8px">{html.escape(b.title)}</b><div class="faint">{html.escape(b.course)} - {fmt_time(b.start)}-{fmt_time(b.end)}</div></div>""", unsafe_allow_html=True)
     if today_view and not task.done:
         if c3.button("Missed? Reschedule", key=f"miss-{b.task_id}-{b.start}", use_container_width=True):
             push_undo("reschedule block")
@@ -843,7 +837,7 @@ def sidebar() -> None:
                 st.session_state.guest = False
                 st.rerun()
         st.markdown("### Auto-Planner")
-        st.caption(f"Hi {st.session_state.user} · {TODAY:%A, %b %d}")
+        st.caption(f"Hi {st.session_state.user} - {TODAY:%A, %b %d}")
         st.session_state.sidebar_page = st.session_state.active_page
         st.radio("Go to", PAGES, key="sidebar_page", on_change=sync_page_from_sidebar)
         st.divider()
@@ -867,7 +861,7 @@ def sidebar() -> None:
                         st.rerun()
             for idx, f in enumerate(st.session_state.fixed):
                 c1, c2 = st.columns([0.75, 0.25])
-                c1.caption(f"{f.day} {fmt_time(f.start)}-{fmt_time(f.end)} · {f.title}")
+                c1.caption(f"{f.day} {fmt_time(f.start)}-{fmt_time(f.end)} - {f.title}")
                 if c2.button("Remove", key=f"rmfixed-{idx}", use_container_width=True):
                     push_undo("remove commitment")
                     st.session_state.fixed.pop(idx)
@@ -949,7 +943,7 @@ def page_dashboard() -> None:
     all_tasks = len(st.session_state.tasks)
     done_tasks = sum(t.done for t in st.session_state.tasks)
     plan_pct = round(done_tasks / all_tasks * 100) if all_tasks else 0
-    st.markdown(f"""<div class="hero"><div class="k">Today's focus</div><div class="b">{done}/{total} tasks done</div><div class="s">{planned:g}h planned today · {compute_streak()} day streak</div></div>""", unsafe_allow_html=True)
+    st.markdown(f"""<div class="hero"><div class="k">Today's focus</div><div class="b">{done}/{total} tasks done</div><div class="s">{planned:g}h planned today - {compute_streak()} day streak</div></div>""", unsafe_allow_html=True)
     st.progress(done / total if total else 0)
     st.markdown(
         f"""<div class="stat-grid">
@@ -976,13 +970,13 @@ def page_dashboard() -> None:
             days = (a.due - TODAY).days
             cls, lbl = ("hi", "Overdue") if days < 0 else pri_label(priority_score(a))
             when = "today" if days == 0 else "tomorrow" if days == 1 else f"in {days}d"
-            st.markdown(f"""<div class="card"><b>{html.escape(a.title)}</b><span class="pill {cls}" style="float:right">{lbl}</span><div class="faint">{html.escape(a.course)} · due {when}</div><span class="pill {status_class(assignment_status(a))}">{assignment_status(a)}</span></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="card"><b>{html.escape(a.title)}</b><span class="pill {cls}" style="float:right">{lbl}</span><div class="faint">{html.escape(a.course)} - due {when}</div><span class="pill {status_class(assignment_status(a))}">{assignment_status(a)}</span></div>""", unsafe_allow_html=True)
 
 
 def page_schedule() -> None:
     st.markdown("### Schedule")
     choices = [TODAY + dt.timedelta(days=i) for i in range(7)]
-    selected = st.selectbox("Day", choices, format_func=lambda d: f"{d:%a, %b %d}" + (" · Today" if d == TODAY else ""))
+    selected = st.selectbox("Day", choices, format_func=lambda d: f"{d:%a, %b %d}" + (" - Today" if d == TODAY else ""))
     items = [(f.start, "fixed", f) for f in st.session_state.fixed if f.day == DAYS[selected.weekday()]]
     if st.session_state.meals_on:
         items += [(s, "fixed", Fixed(DAYS[selected.weekday()], s, e, label, "meal")) for s, e, label in st.session_state.meals]
@@ -996,7 +990,7 @@ def page_schedule() -> None:
             render_block(item, today_view=(selected == TODAY))
         else:
             color = KIND_COLORS.get(item.kind, TEXT)
-            st.markdown(f"""<div class="card" style="border-left:5px solid {color}"><b>{html.escape(item.title)}</b><div class="faint">{KIND_LABELS.get(item.kind, item.kind)} · {fmt_time(item.start)}-{fmt_time(item.end)}</div></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="card" style="border-left:5px solid {color}"><b>{html.escape(item.title)}</b><div class="faint">{KIND_LABELS.get(item.kind, item.kind)} - {fmt_time(item.start)}-{fmt_time(item.end)}</div></div>""", unsafe_allow_html=True)
 
 
 def calendar_items(day: dt.date) -> dict[str, list]:
@@ -1010,18 +1004,40 @@ def calendar_items(day: dt.date) -> dict[str, list]:
 
 def render_day_details(day: dt.date) -> None:
     items = calendar_items(day)
-    st.markdown(f"""<div class="card"><div class="faint">{day:%A}</div><div style="font-size:24px;font-weight:800">{day:%B %d, %Y}</div><div class="faint">{len(items['due'])} due · {len(items['study'])} study · {len(items['fixed'])} fixed</div></div>""", unsafe_allow_html=True)
+    st.markdown(
+        f"""<div class="card"><div class="faint">{day:%A}</div>
+        <div style="font-size:24px;font-weight:800">{day:%B %d, %Y}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+        <span class="pill hi">{len(items['due'])} due</span>
+        <span class="pill status-progress">{len(items['study'])} study</span>
+        <span class="pill status-not">{len(items['fixed'])} fixed</span>
+        </div></div>""",
+        unsafe_allow_html=True,
+    )
     if day > TODAY + dt.timedelta(days=HORIZON_DAYS - 1):
         st.caption("Study blocks will be generated closer to this date.")
-    if not any(items.values()):
+    if not (items["due"] or items["study"] or items["fixed"] or items["meals"]):
         st.markdown("""<div class="empty-note">Nothing due today -- enjoy the break.</div>""", unsafe_allow_html=True)
-    for a in items["due"]:
-        st.markdown(f"""<div class="card" style="border-left:5px solid {DANGER}"><b>Due: {html.escape(a.title)}</b><div class="faint">{html.escape(a.course)} · ~{a.hours:g}h · {assignment_status(a)}</div></div>""", unsafe_allow_html=True)
-    for b in sorted(items["study"], key=lambda x: x.start):
-        render_block(b, today_view=(day == TODAY))
-    for f in sorted(items["fixed"] + items["meals"], key=lambda x: x.start):
-        color = KIND_COLORS.get(f.kind, TEXT)
-        st.markdown(f"""<div class="card" style="border-left:5px solid {color}"><b>{html.escape(f.title)}</b><div class="faint">{KIND_LABELS.get(f.kind, f.kind)} · {fmt_time(f.start)}-{fmt_time(f.end)}</div></div>""", unsafe_allow_html=True)
+    if items["due"]:
+        st.markdown("""<div class="section-title"><div class="icon">!</div><b>Due</b></div>""", unsafe_allow_html=True)
+        for a in items["due"]:
+            st.markdown(f"""<div class="card" style="border-left:5px solid {DANGER}"><b>{html.escape(a.title)}</b><div class="faint">{html.escape(a.course)} - ~{a.hours:g}h - {assignment_status(a)}</div></div>""", unsafe_allow_html=True)
+    if items["study"]:
+        st.markdown("""<div class="section-title"><div class="icon">S</div><b>Study plan</b></div>""", unsafe_allow_html=True)
+        for b in sorted(items["study"], key=lambda x: x.start):
+            render_block(b, today_view=(day == TODAY))
+    elif day <= TODAY + dt.timedelta(days=HORIZON_DAYS - 1):
+        st.markdown("""<div class="empty-note">No study blocks scheduled for this day.</div>""", unsafe_allow_html=True)
+    if items["fixed"]:
+        st.markdown("""<div class="section-title"><div class="icon">C</div><b>Commitments</b></div>""", unsafe_allow_html=True)
+        for f in sorted(items["fixed"], key=lambda x: x.start):
+            color = KIND_COLORS.get(f.kind, TEXT)
+            st.markdown(f"""<div class="card" style="border-left:5px solid {color}"><b>{html.escape(f.title)}</b><div class="faint">{KIND_LABELS.get(f.kind, f.kind)} - {fmt_time(f.start)}-{fmt_time(f.end)}</div></div>""", unsafe_allow_html=True)
+    if items["meals"]:
+        st.markdown("""<div class="section-title"><div class="icon">M</div><b>Meals</b></div>""", unsafe_allow_html=True)
+        for f in sorted(items["meals"], key=lambda x: x.start):
+            color = KIND_COLORS.get(f.kind, TEXT)
+            st.markdown(f"""<div class="card" style="border-left:5px solid {color}"><b>{html.escape(f.title)}</b><div class="faint">{fmt_time(f.start)}-{fmt_time(f.end)}</div></div>""", unsafe_allow_html=True)
 
 
 def render_month_grid(month_start: dt.date, selected: dt.date) -> str:
@@ -1053,53 +1069,6 @@ def render_month_grid(month_start: dt.date, selected: dt.date) -> str:
                       f"<div class='dots'>{dots}</div></a></td>")
         rows += f"<tr>{cells}</tr>"
     return f"<table class='cal'><thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table>"
-
-
-def render_clickable_month_grid(month_start: dt.date, selected: dt.date) -> None:
-    """Interactive month grid: each day is a real Streamlit button."""
-    st.markdown(
-        "<div class='cal-weekdays'>"
-        + "".join(f"<div class='cal-weekday'>{day}</div>" for day in DAYS)
-        + "</div>",
-        unsafe_allow_html=True,
-    )
-    weeks = calendar.Calendar(firstweekday=calendar.MONDAY).monthdayscalendar(
-        month_start.year, month_start.month
-    )
-    for week_idx, week in enumerate(weeks):
-        cols = st.columns(7)
-        for day_idx, num in enumerate(week):
-            col = cols[day_idx]
-            if not num:
-                col.markdown(
-                    "<div style='min-height:48px;border:1px solid transparent'></div>",
-                    unsafe_allow_html=True,
-                )
-                continue
-            day = dt.date(month_start.year, month_start.month, num)
-            items = calendar_items(day)
-            label = str(num)
-            if day == TODAY:
-                label = f"{num} •"
-            if col.button(
-                label,
-                key=f"calbtn-{day.isoformat()}",
-                use_container_width=True,
-                type="primary" if day == selected else "secondary",
-            ):
-                st.session_state.calendar_selected_date = day
-                st.rerun()
-            dots = ""
-            for color, n in (
-                (DANGER, len(items["due"])),
-                (BRAND, len(items["study"])),
-                (FIXED_DOT, len(items["fixed"])),
-            ):
-                dots += (
-                    f"<span class='cal-mini-dot' style='background:{color}'></span>"
-                    * min(n, 3)
-                )
-            col.markdown(f"<div class='cal-dot-row'>{dots}</div>", unsafe_allow_html=True)
 
 
 def page_calendar() -> None:
@@ -1153,7 +1122,7 @@ def page_calendar() -> None:
             items = calendar_items(d)
             if items["due"] or items["study"] or items["fixed"]:
                 row, action = st.columns([.74, .26])
-                row.markdown(f"**{d:%a, %b %d}**  <span class='faint'>{len(items['due'])} due · {len(items['study'])} study · {len(items['fixed'])} fixed</span>", unsafe_allow_html=True)
+                row.markdown(f"**{d:%a, %b %d}**  <span class='faint'>{len(items['due'])} due - {len(items['study'])} study - {len(items['fixed'])} fixed</span>", unsafe_allow_html=True)
                 if action.button("Open", key=f"open-{d}", use_container_width=True):
                     st.session_state.calendar_selected_date = d
                     st.rerun()
@@ -1171,9 +1140,9 @@ def page_calendar() -> None:
     st.markdown(render_month_grid(month_start, selected), unsafe_allow_html=True)
     st.markdown(
         f"<div class='faint' style='margin:2px 0 6px'>"
-        f"<span style='color:{DANGER};font-size:15px'>●</span> due &nbsp;&nbsp;"
-        f"<span style='color:{BRAND};font-size:15px'>●</span> study &nbsp;&nbsp;"
-        f"<span style='color:{FIXED_DOT};font-size:15px'>●</span> class / work / club</div>",
+        f"<span style='color:{DANGER};font-size:15px'>&bull;</span> due &nbsp;&nbsp;"
+        f"<span style='color:{BRAND};font-size:15px'>&bull;</span> study &nbsp;&nbsp;"
+        f"<span style='color:{FIXED_DOT};font-size:15px'>&bull;</span> class / work / club</div>",
         unsafe_allow_html=True)
     with st.expander("Jump to a date"):
         last_day = calendar.monthrange(month_start.year, month_start.month)[1]
@@ -1483,7 +1452,7 @@ def page_import() -> None:
                 st.rerun()
             for idx, source in enumerate(sources):
                 st.caption(
-                    f"{source.get('name', 'Calendar feed')} · "
+                    f"{source.get('name', 'Calendar feed')} - "
                     f"{source.get('last_count', 0)} events seen"
                 )
     with t4:
@@ -1521,7 +1490,7 @@ def page_import() -> None:
                 st.markdown(
                     f"""<div class="card"><b>{html.escape(source.get('name', 'Calendar feed'))}</b>
                     <div class="faint">{html.escape(source.get('url', ''))}</div>
-                    <div class="faint">Last sync: {html.escape(str(last))} · events seen: {source.get('last_count', 0)}</div>
+                    <div class="faint">Last sync: {html.escape(str(last))} - events seen: {source.get('last_count', 0)}</div>
                     </div>""",
                     unsafe_allow_html=True,
                 )
@@ -1641,7 +1610,7 @@ def page_calendar_sync() -> None:
         st.markdown(
             f"""<div class="card"><b>{html.escape(source.get('name', 'Calendar feed'))}</b>
             <div class="faint">{html.escape(source.get('url', ''))}</div>
-            <div class="faint">Last sync: {html.escape(str(last))} · events seen: {source.get('last_count', 0)}</div>
+            <div class="faint">Last sync: {html.escape(str(last))} - events seen: {source.get('last_count', 0)}</div>
             </div>""",
             unsafe_allow_html=True,
         )
@@ -1671,7 +1640,7 @@ def page_tasks() -> None:
         cls, lbl = ("hi", "Overdue") if days < 0 else pri_label(score[a.id])
         status = assignment_status(a)
         done = sum(t.done for t in tasks)
-        st.markdown(f"""<div class="card"><div style="display:flex;justify-content:space-between;gap:10px"><div><b>{html.escape(a.title)}</b><div class="faint">{html.escape(a.course)} · due {a.due:%b %d} · {done}/{len(tasks)} tasks</div></div><div><span class="pill {cls}">{lbl}</span> <span class="pill {status_class(status)}">{status}</span></div></div></div>""", unsafe_allow_html=True)
+        st.markdown(f"""<div class="card"><div style="display:flex;justify-content:space-between;gap:10px"><div><b>{html.escape(a.title)}</b><div class="faint">{html.escape(a.course)} - due {a.due:%b %d} - {done}/{len(tasks)} tasks</div></div><div><span class="pill {cls}">{lbl}</span> <span class="pill {status_class(status)}">{status}</span></div></div></div>""", unsafe_allow_html=True)
         c1, c2 = st.columns([.7, .3])
         new_status = c1.selectbox("Status", STATUSES, index=STATUSES.index(status), key=f"status-{a.id}", label_visibility="collapsed")
         if new_status != status:
@@ -1698,7 +1667,7 @@ def page_tasks() -> None:
                 generate_plan()
                 st.rerun()
         for t in visible:
-            checked = st.checkbox(f"{t.title} · ~{t.hours:g}h", value=t.done, key=f"task-{t.id}")
+            checked = st.checkbox(f"{t.title} - ~{t.hours:g}h", value=t.done, key=f"task-{t.id}")
             if checked != t.done:
                 push_undo("update task")
                 set_task_done(t, checked)
@@ -1709,7 +1678,7 @@ def page_tasks() -> None:
 def page_plan() -> None:
     st.markdown("### Auto Study Plan")
     total_h = sum(b.end - b.start for b in st.session_state.blocks)
-    st.markdown(f"""<div class="card"><b>Generated for the next {HORIZON_DAYS} days</b><div class="faint">{len(st.session_state.blocks)} study blocks · {total_h:g} planned hours</div></div>""", unsafe_allow_html=True)
+    st.markdown(f"""<div class="card"><b>Generated for the next {HORIZON_DAYS} days</b><div class="faint">{len(st.session_state.blocks)} study blocks - {total_h:g} planned hours</div></div>""", unsafe_allow_html=True)
     render_overload_banner()
     if st.button("Build / refresh my study plan", type="primary", use_container_width=True):
         push_undo("refresh plan")
@@ -1735,7 +1704,7 @@ def page_reminders() -> None:
         days = (a.due - TODAY).days
         if days <= 3:
             shown = True
-            st.markdown(f"""<div class="card"><b>{html.escape(a.title)}</b><div class="faint">{html.escape(a.course)} · {'overdue' if days < 0 else 'due today' if days == 0 else f'due in {days}d'}</div></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="card"><b>{html.escape(a.title)}</b><div class="faint">{html.escape(a.course)} - {'overdue' if days < 0 else 'due today' if days == 0 else f'due in {days}d'}</div></div>""", unsafe_allow_html=True)
     if not shown:
         st.markdown("""<div class="empty-note">No urgent reminders right now.</div>""", unsafe_allow_html=True)
 
@@ -1745,7 +1714,7 @@ def page_progress() -> None:
     done = sum(t.done for t in st.session_state.tasks)
     total = len(st.session_state.tasks)
     pct = done / total if total else 0
-    st.markdown(f"""<div class="hero"><div class="k">This plan</div><div class="b">{done}/{total} tasks · {pct:.0%}</div><div class="s">{compute_streak()} day streak · {sum(st.session_state.history):g}h this week</div></div>""", unsafe_allow_html=True)
+    st.markdown(f"""<div class="hero"><div class="k">This plan</div><div class="b">{done}/{total} tasks - {pct:.0%}</div><div class="s">{compute_streak()} day streak - {sum(st.session_state.history):g}h this week</div></div>""", unsafe_allow_html=True)
     st.progress(pct)
     labels = [(TODAY - dt.timedelta(days=6 - i)).strftime("%a") for i in range(7)]
     st.bar_chart(pd.DataFrame({"hours": st.session_state.history}, index=labels), color=BRAND, height=220)
@@ -1800,6 +1769,6 @@ autosave()
 if st.session_state.get("_save_error"):
     st.warning(f"Auto-save could not reach Supabase: {st.session_state._save_error}")
 elif st.session_state.get("auth"):
-    st.caption("Auto-Planner · saved to your account.")
+    st.caption("Auto-Planner - saved to your account.")
 else:
-    st.caption("Auto-Planner · guest mode, not saved.")
+    st.caption("Auto-Planner - guest mode, not saved.")

@@ -43,6 +43,8 @@ again editable UTF-8 source and compiles successfully.
 - Compact phone-friendly month grid with persistent Agenda/Month view state,
   visible due/study/fixed color legend, and compressed tappable day cells.
   Selected-day details appear above the grid immediately after tapping a date.
+- Clean tapped-day plan panel with summary badges and separate Due, Study Plan,
+  Commitments, and Meals sections.
 - PWA manifest/icons for iPhone Home Screen install.
 - Safer testing launchers:
   - `Start Auto-Planner.bat` for computer-only local testing.
