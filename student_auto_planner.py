@@ -156,6 +156,16 @@ def inject_ui() -> None:
         input, textarea, select {font-size:16px !important;}
         .stProgress > div > div > div {background:#01696f;}
         /* compact month calendar that fits any width (incl. phones) */
+        table.cal {width:100%;border-collapse:separate;border-spacing:4px;table-layout:fixed;margin:8px 0 6px;}
+        table.cal th {font-size:11px;color:#837d70;font-weight:800;padding:3px 0;text-align:center;}
+        table.cal td {height:46px;vertical-align:top;text-align:center;padding:0;border-radius:9px;background:#ffffff;border:1px solid rgba(40,37,29,.08);box-shadow:0 2px 8px rgba(40,37,29,.04);}
+        table.cal td.empty {background:transparent;border-color:transparent;box-shadow:none;}
+        table.cal td.today {background:#e7f4ee;}
+        table.cal td.sel {outline:2px solid #01696f;outline-offset:-2px;}
+        table.cal a.day-link {display:block;min-height:46px;padding:5px 2px;text-decoration:none;color:#28251d;border-radius:9px;}
+        table.cal .dnum {font-size:12px;font-weight:800;line-height:1.1;}
+        table.cal .dots {display:flex;flex-wrap:wrap;gap:2px;justify-content:center;margin-top:4px;min-height:8px;}
+        table.cal .dot {width:6px;height:6px;border-radius:50%;display:inline-block;}
         .section-title {display:flex;align-items:center;gap:10px;margin:16px 0 8px;}
         .section-title .icon {width:28px;height:28px;border-radius:9px;display:grid;place-items:center;background:#e7f4ee;color:#01696f;font-weight:900;}
         .section-title b {font-size:18px;}
@@ -171,6 +181,11 @@ def inject_ui() -> None:
           .hero .b {font-size:24px;}
           .card {padding:13px 14px;}
           .stat-grid {grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
+          table.cal {border-spacing:3px;}
+          table.cal td {height:39px;border-radius:8px;}
+          table.cal a.day-link {min-height:39px;padding:4px 1px;}
+          table.cal .dnum {font-size:11px;}
+          table.cal .dot {width:5px;height:5px;}
           .cal-weekdays {gap:3px;}
           .cal-weekday {font-size:10px;}
         }
@@ -617,6 +632,11 @@ def add_months(base: dt.date, months: int) -> dt.date:
     return dt.date(base.year + idx // 12, idx % 12 + 1, 1)
 
 
+def month_offset_for(day: dt.date) -> int:
+    start = TODAY.replace(day=1)
+    return max(0, min(CALENDAR_MONTHS - 1, (day.year - start.year) * 12 + day.month - start.month))
+
+
 def init_state() -> None:
     # Shared UI state — must exist for BOTH guests and signed-in users
     # (sidebar()/pages read these every run).
@@ -1023,8 +1043,14 @@ def render_month_grid(month_start: dt.date, selected: dt.date) -> str:
                              (FIXED_DOT, len(items["fixed"]))):
                 dots += f"<span class='dot' style='background:{color}'></span>" * min(n, 4)
             cls = " ".join(c for c, on in (("today", d == TODAY), ("sel", d == selected)) if on)
-            cells += (f"<td class='{cls}'><div class='dnum'>{num}</div>"
-                      f"<div class='dots'>{dots}</div></td>")
+            href = (
+                f"?cal_date={d.isoformat()}"
+                f"&cal_view=Month%20grid"
+                f"&calendar_month_offset={month_offset_for(d)}"
+            )
+            cells += (f"<td class='{cls}'><a class='day-link' href='{href}' target='_self'>"
+                      f"<div class='dnum'>{num}</div>"
+                      f"<div class='dots'>{dots}</div></a></td>")
         rows += f"<tr>{cells}</tr>"
     return f"<table class='cal'><thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table>"
 
@@ -1080,6 +1106,15 @@ def page_calendar() -> None:
     st.markdown("### Calendar")
     if st.button("Connect calendars / sync feeds", use_container_width=True, key="calendar-open-sync"):
         go_page("Calendar Sync")
+    query_date = st.query_params.get("cal_date")
+    if query_date:
+        try:
+            clicked = dt.date.fromisoformat(query_date)
+            st.session_state.calendar_selected_date = clicked
+            st.session_state.calendar_month_offset = month_offset_for(clicked)
+            st.session_state.cal_view = "Month grid"
+        except ValueError:
+            pass
     offset = max(0, min(CALENDAR_MONTHS - 1, int(st.session_state.get("calendar_month_offset", 0))))
     month_start = add_months(TODAY.replace(day=1), offset)
     c1, c2, c3, c4 = st.columns([.18, .44, .18, .20])
@@ -1133,7 +1168,7 @@ def page_calendar() -> None:
         """<div class="section-title"><div class="icon">M</div><b>Month grid</b></div>""",
         unsafe_allow_html=True,
     )
-    render_clickable_month_grid(month_start, selected)
+    st.markdown(render_month_grid(month_start, selected), unsafe_allow_html=True)
     st.markdown(
         f"<div class='faint' style='margin:2px 0 6px'>"
         f"<span style='color:{DANGER};font-size:15px'>●</span> due &nbsp;&nbsp;"
