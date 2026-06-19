@@ -677,18 +677,14 @@ def init_state() -> None:
 
 def sync_page_from_sidebar() -> None:
     st.session_state.active_page = st.session_state.sidebar_page
-    st.session_state.top_page = st.session_state.active_page
 
 
 def sync_page_from_top() -> None:
     st.session_state.active_page = st.session_state.top_page
-    st.session_state.sidebar_page = st.session_state.active_page
 
 
 def go_page(page: str) -> None:
     st.session_state.active_page = page
-    st.session_state.sidebar_page = page
-    st.session_state.top_page = page
     st.rerun()
 
 
