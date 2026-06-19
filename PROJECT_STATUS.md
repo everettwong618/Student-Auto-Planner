@@ -55,6 +55,8 @@ again editable UTF-8 source and compiles successfully.
   an individual block into Google Calendar.
 - Cleaner assignment cards on Dashboard and Assignments with responsive badges,
   due timing, and task progress bars.
+- Reminders page groups active work into Overdue, Due today, and Next 3 days,
+  while completed assignments stay out of urgent reminders.
 - Consistent polished page headers across the main app pages with short
   subtitles explaining each section's purpose.
 - PWA manifest/icons for iPhone Home Screen install.

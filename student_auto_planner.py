@@ -1813,14 +1813,23 @@ def page_plan() -> None:
 def page_reminders() -> None:
     page_header("Reminders", "See urgent deadlines and overload warnings before they sneak up.", "Focus")
     render_overload_banner()
-    shown = False
-    for a in sorted(st.session_state.assignments, key=lambda x: x.due):
-        days = (a.due - TODAY).days
-        if days <= 3:
-            shown = True
-            st.markdown(f"""<div class="card"><b>{html.escape(a.title)}</b><div class="faint">{html.escape(a.course)} - {'overdue' if days < 0 else 'due today' if days == 0 else f'due in {days}d'}</div></div>""", unsafe_allow_html=True)
+    active = [a for a in st.session_state.assignments if assignment_status(a) != "Done"]
+    groups = [
+        ("Overdue", [a for a in active if (a.due - TODAY).days < 0]),
+        ("Due today", [a for a in active if (a.due - TODAY).days == 0]),
+        ("Next 3 days", [a for a in active if 1 <= (a.due - TODAY).days <= 3]),
+    ]
+    shown = any(items for _, items in groups)
     if not shown:
         st.markdown("""<div class="empty-note">No urgent reminders right now.</div>""", unsafe_allow_html=True)
+        return
+    for title, items in groups:
+        if not items:
+            continue
+        icon = "!" if title == "Overdue" else "T" if title == "Due today" else "3"
+        st.markdown(f"""<div class="section-title"><div class="icon">{icon}</div><b>{title}</b></div>""", unsafe_allow_html=True)
+        for a in sorted(items, key=lambda x: x.due):
+            render_assignment_card(a, priority_score(a), compact=True)
 
 
 def page_progress() -> None:
