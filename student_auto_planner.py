@@ -226,6 +226,72 @@ def store_auth_response(response, fallback_email: str) -> bool:
     return True
 
 
+# --- Stay signed in across a browser refresh: remember the refresh token in a
+#     cookie and restore the Supabase session on load. All guarded so a failure
+#     just falls back to the normal login screen; guests are never affected. ---
+try:
+    import extra_streamlit_components as stx
+except Exception:  # pragma: no cover - component optional
+    stx = None
+
+AUTH_COOKIE = "ap_refresh"
+
+
+def _cookies():
+    if stx is None:
+        return None
+    if "cookie_mgr" not in st.session_state:
+        try:
+            st.session_state.cookie_mgr = stx.CookieManager(key="ap_cookies")
+        except Exception:
+            st.session_state.cookie_mgr = None
+    return st.session_state.cookie_mgr
+
+
+def remember_session() -> None:
+    cm = _cookies()
+    token = (st.session_state.get("auth") or {}).get("refresh_token")
+    if not cm or not token:
+        return
+    try:
+        cm.set(AUTH_COOKIE, token,
+               expires_at=dt.datetime.now() + dt.timedelta(days=30), key="ap_cookie_set")
+    except Exception:
+        pass
+
+
+def forget_session() -> None:
+    cm = _cookies()
+    if not cm:
+        return
+    try:
+        cm.delete(AUTH_COOKIE, key="ap_cookie_del")
+    except Exception:
+        pass
+
+
+def try_restore_session() -> None:
+    if st.session_state.get("auth") or st.session_state.get("guest") or not supabase_ready():
+        return
+    cm = _cookies()
+    if not cm:
+        return
+    try:
+        token = cm.get(AUTH_COOKIE)
+    except Exception:
+        token = None
+    if not token:
+        return
+    try:
+        if store_auth_response(get_sb().auth.refresh_session(token), ""):
+            remember_session()
+            st.rerun()
+        else:
+            forget_session()
+    except Exception:
+        forget_session()
+
+
 def sign_in(email: str, password: str) -> bool:
     return store_auth_response(get_sb().auth.sign_in_with_password({"email": email.strip(), "password": password}), email)
 
@@ -235,6 +301,7 @@ def sign_up(email: str, password: str) -> bool:
 
 
 def sign_out() -> None:
+    forget_session()
     try:
         if "sb" in st.session_state:
             st.session_state.sb.auth.sign_out()
@@ -569,6 +636,7 @@ def login_gate() -> None:
         if st.button("Log in", type="primary", use_container_width=True, disabled=not supabase_ready()):
             try:
                 if sign_in(email, password):
+                    remember_session()
                     st.rerun()
             except Exception as exc:
                 st.error(f"Could not log in: {exc}")
@@ -580,6 +648,7 @@ def login_gate() -> None:
                 if len(password) < 6:
                     st.warning("Use at least 6 characters.")
                 elif sign_up(email, password):
+                    remember_session()
                     st.rerun()
                 else:
                     st.info("Check your email to confirm the account, then log in.")
@@ -601,6 +670,7 @@ def login_gate() -> None:
     st.stop()
 
 
+try_restore_session()
 login_gate()
 init_state()
 
