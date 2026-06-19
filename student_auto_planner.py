@@ -143,12 +143,24 @@ def inject_ui() -> None:
         .stButton>button, .stDownloadButton>button, .stForm button, [role="tab"] {min-height:44px;border-radius:10px;}
         input, textarea, select {font-size:16px !important;}
         .stProgress > div > div > div {background:#01696f;}
+        /* compact month calendar that fits any width (incl. phones) */
+        table.cal {width:100%;border-collapse:collapse;table-layout:fixed;margin:8px 0;}
+        table.cal th {font-size:11px;color:#837d70;font-weight:700;padding:5px 0;text-align:center;}
+        table.cal td {height:48px;vertical-align:top;border:1px solid rgba(40,37,29,.08);padding:3px;text-align:center;}
+        table.cal td.empty {border:none;}
+        table.cal td.today {background:#e7f4ee;}
+        table.cal td.sel {outline:2px solid #01696f;outline-offset:-2px;border-radius:4px;}
+        table.cal .dnum {font-size:12px;font-weight:700;color:#28251d;}
+        table.cal .dots {display:flex;flex-wrap:wrap;gap:2px;justify-content:center;margin-top:3px;}
+        table.cal .dot {width:6px;height:6px;border-radius:50%;display:inline-block;}
         @media (max-width: 700px) {
-          .block-container {padding-left:.7rem;padding-right:.7rem;padding-top:.8rem;}
-          section[data-testid="stSidebar"] {width:88vw !important;min-width:88vw !important;}
+          .block-container {padding-left:.6rem;padding-right:.6rem;padding-top:.8rem;}
           .hero {padding:16px;border-radius:12px;}
           .hero .b {font-size:24px;}
           .card {padding:13px 14px;}
+          table.cal td {height:40px;}
+          table.cal .dnum {font-size:11px;}
+          table.cal .dot {width:5px;height:5px;}
         }
         </style>
         """,
@@ -936,6 +948,31 @@ def render_day_details(day: dt.date) -> None:
         st.markdown(f"""<div class="card" style="border-left:5px solid {color}"><b>{html.escape(f.title)}</b><div class="faint">{KIND_LABELS.get(f.kind, f.kind)} · {fmt_time(f.start)}-{fmt_time(f.end)}</div></div>""", unsafe_allow_html=True)
 
 
+def render_month_grid(month_start: dt.date, selected: dt.date) -> str:
+    """A compact HTML month grid that fits phone widths (display + dots)."""
+    weeks = calendar.Calendar(firstweekday=calendar.MONDAY).monthdayscalendar(
+        month_start.year, month_start.month)
+    head = "".join(f"<th>{d}</th>" for d in DAYS)
+    rows = ""
+    for week in weeks:
+        cells = ""
+        for num in week:
+            if not num:
+                cells += "<td class='empty'></td>"
+                continue
+            d = dt.date(month_start.year, month_start.month, num)
+            items = calendar_items(d)
+            dots = ""
+            for color, n in ((DANGER, len(items["due"])), (BRAND, len(items["study"])),
+                             (TEXT, len(items["fixed"]))):
+                dots += f"<span class='dot' style='background:{color}'></span>" * min(n, 4)
+            cls = " ".join(c for c, on in (("today", d == TODAY), ("sel", d == selected)) if on)
+            cells += (f"<td class='{cls}'><div class='dnum'>{num}</div>"
+                      f"<div class='dots'>{dots}</div></td>")
+        rows += f"<tr>{cells}</tr>"
+    return f"<table class='cal'><thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table>"
+
+
 def page_calendar() -> None:
     st.markdown("### Calendar")
     offset = max(0, min(CALENDAR_MONTHS - 1, int(st.session_state.get("calendar_month_offset", 0))))
@@ -954,7 +991,7 @@ def page_calendar() -> None:
         st.session_state.calendar_month_offset = offset + 1
         st.session_state.calendar_selected_date = add_months(TODAY.replace(day=1), offset + 1)
         st.rerun()
-    view = st.segmented_control("View", ["Agenda", "Month grid"], default="Agenda") if hasattr(st, "segmented_control") else st.radio("View", ["Agenda", "Month grid"], horizontal=True)
+    view = st.segmented_control("View", ["Agenda", "Month grid"], default="Agenda", key="cal_view") if hasattr(st, "segmented_control") else st.radio("View", ["Agenda", "Month grid"], horizontal=True, key="cal_view")
     selected = st.session_state.get("calendar_selected_date", TODAY)
     if isinstance(selected, str):
         selected = dt.date.fromisoformat(selected)
@@ -974,25 +1011,18 @@ def page_calendar() -> None:
                     st.session_state.calendar_selected_date = d
                     st.rerun()
         return
-    for week in calendar.Calendar(firstweekday=calendar.MONDAY).monthdayscalendar(month_start.year, month_start.month):
-        cols = st.columns(7)
-        for idx, num in enumerate(week):
-            if not num:
-                cols[idx].markdown("&nbsp;", unsafe_allow_html=True)
-                continue
-            d = dt.date(month_start.year, month_start.month, num)
-            items = calendar_items(d)
-            label = f"{num}" + (" Today" if d == TODAY else "")
-            if cols[idx].button(label, key=f"day-{d}", use_container_width=True, type="primary" if d == selected else "secondary"):
-                st.session_state.calendar_selected_date = d
-                st.rerun()
-            entries = [("Due", DANGER)] * len(items["due"]) + [("Study", BRAND)] * len(items["study"]) + [("Fixed", TEXT)] * len(items["fixed"])
-            for text, color in entries[:3]:
-                cols[idx].markdown(f"<div class='faint'><span style='color:{color}'>●</span> {text}</div>", unsafe_allow_html=True)
-            if len(entries) > 3:
-                cols[idx].caption(f"+{len(entries) - 3} more")
+    st.markdown(render_month_grid(month_start, selected), unsafe_allow_html=True)
+    st.caption("● red = due  ·  ● teal = study  ·  ● dark = class/work/club")
+    last_day = calendar.monthrange(month_start.year, month_start.month)[1]
+    picked = st.date_input(
+        "Show a day's details", value=selected,
+        min_value=dt.date(month_start.year, month_start.month, 1),
+        max_value=dt.date(month_start.year, month_start.month, last_day), key="cal_pick")
+    if picked != selected:
+        st.session_state.calendar_selected_date = picked
+        st.rerun()
     st.divider()
-    render_day_details(selected)
+    render_day_details(picked)
 
 
 COURSE_RE = re.compile(r"\b([A-Z]{2,4})\s?[- ]?(\d{2,3}[A-Z]?)\b")
