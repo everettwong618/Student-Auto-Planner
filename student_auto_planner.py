@@ -1859,9 +1859,27 @@ def page_progress() -> None:
     done = sum(t.done for t in st.session_state.tasks)
     total = len(st.session_state.tasks)
     pct = done / total if total else 0
+    active_assignments = sum(1 for a in st.session_state.assignments if assignment_status(a) != "Done")
+    due_week = sum(1 for a in st.session_state.assignments if assignment_status(a) != "Done" and 0 <= (a.due - TODAY).days <= 7)
+    planned_week = sum(b.end - b.start for b in st.session_state.blocks if 0 <= (b.date - TODAY).days <= 7)
+    done_assignments = sum(1 for a in st.session_state.assignments if assignment_status(a) == "Done")
     st.markdown(f"""<div class="hero"><div class="k">This plan</div><div class="b">{done}/{total} tasks - {pct:.0%}</div><div class="s">{compute_streak()} day streak - {sum(st.session_state.history):g}h this week</div></div>""", unsafe_allow_html=True)
     st.progress(pct)
+    st.markdown(
+        f"""<div class="stat-grid">
+        <div class="stat-card"><b>{active_assignments}</b><span>active assignments</span></div>
+        <div class="stat-card"><b>{due_week}</b><span>due this week</span></div>
+        <div class="stat-card"><b>{planned_week:g}h</b><span>planned next 7 days</span></div>
+        <div class="stat-card"><b>{done_assignments}</b><span>assignments done</span></div>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+    if active_assignments:
+        st.markdown("""<div class="section-title"><div class="icon">N</div><b>Next up</b></div>""", unsafe_allow_html=True)
+        for a in sorted([a for a in st.session_state.assignments if assignment_status(a) != "Done"], key=lambda x: (x.due, -priority_score(x)))[:3]:
+            render_assignment_card(a, priority_score(a), compact=True)
     labels = [(TODAY - dt.timedelta(days=6 - i)).strftime("%a") for i in range(7)]
+    st.markdown("""<div class="section-title"><div class="icon">H</div><b>Study hours</b></div>""", unsafe_allow_html=True)
     st.bar_chart(pd.DataFrame({"hours": st.session_state.history}, index=labels), color=BRAND, height=220)
 
 

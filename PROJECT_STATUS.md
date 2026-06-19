@@ -63,6 +63,8 @@ again editable UTF-8 source and compiles successfully.
   while completed assignments stay out of urgent reminders.
 - Consistent polished page headers across the main app pages with short
   subtitles explaining each section's purpose.
+- Progress page now includes active assignment, due-this-week, planned-hours,
+  completed-assignment stats plus a compact Next up list.
 - PWA manifest/icons for iPhone Home Screen install.
 - Safer testing launchers:
   - `Start Auto-Planner.bat` for computer-only local testing.
