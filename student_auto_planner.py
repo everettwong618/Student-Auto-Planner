@@ -156,29 +156,21 @@ def inject_ui() -> None:
         input, textarea, select {font-size:16px !important;}
         .stProgress > div > div > div {background:#01696f;}
         /* compact month calendar that fits any width (incl. phones) */
-        table.cal {width:100%;border-collapse:collapse;table-layout:fixed;margin:8px 0;}
-        table.cal th {font-size:11px;color:#837d70;font-weight:700;padding:5px 0;text-align:center;}
-        table.cal td {height:48px;vertical-align:top;border:1px solid rgba(40,37,29,.08);padding:3px;text-align:center;}
-        table.cal td.empty {border:none;}
-        table.cal td.today {background:#e7f4ee;}
-        table.cal td.sel {outline:2px solid #01696f;outline-offset:-2px;border-radius:4px;}
-        table.cal .dnum {font-size:12px;font-weight:700;color:#28251d;}
-        table.cal .dots {display:flex;flex-wrap:wrap;gap:2px;justify-content:center;margin-top:3px;}
-        table.cal .dot {width:6px;height:6px;border-radius:50%;display:inline-block;}
+        .section-title {display:flex;align-items:center;gap:10px;margin:16px 0 8px;}
+        .section-title .icon {width:28px;height:28px;border-radius:9px;display:grid;place-items:center;background:#e7f4ee;color:#01696f;font-weight:900;}
+        .section-title b {font-size:18px;}
         .cal-weekdays {display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin-top:8px;}
         .cal-weekday {text-align:center;color:#837d70;font-size:11px;font-weight:800;}
-        div[data-testid="stHorizontalBlock"]:has(button[kind]) {gap:4px;}
+        div[data-testid="stHorizontalBlock"]:has(button[kind]) {gap:5px;}
         .cal-dot-row {display:flex;justify-content:center;gap:2px;min-height:8px;margin:-7px 0 5px;}
         .cal-mini-dot {width:5px;height:5px;border-radius:50%;display:inline-block;}
+        .selected-day-note {background:linear-gradient(145deg,#ffffff,#f5fbf9);border:1px solid rgba(1,105,111,.16);border-left:5px solid #01696f;border-radius:12px;padding:12px 14px;margin:8px 0 12px;box-shadow:0 6px 18px rgba(1,105,111,.08);}
         @media (max-width: 700px) {
           .block-container {padding-left:.6rem;padding-right:.6rem;padding-top:.8rem;}
           .hero {padding:16px;border-radius:12px;}
           .hero .b {font-size:24px;}
           .card {padding:13px 14px;}
           .stat-grid {grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
-          table.cal td {height:40px;}
-          table.cal .dnum {font-size:11px;}
-          table.cal .dot {width:5px;height:5px;}
           .cal-weekdays {gap:3px;}
           .cal-weekday {font-size:10px;}
         }
@@ -668,22 +660,18 @@ def go_page(page: str) -> None:
 
 def render_action_bar() -> None:
     actions = [
-        ("Dashboard", "Today", "focus"),
-        ("Calendar", "Calendar", "month"),
-        ("Calendar Sync", "Sync", "feeds"),
-        ("Study Plan", "Plan", "30 days"),
+        ("Dashboard", "Today"),
+        ("Calendar", "Calendar"),
+        ("Calendar Sync", "Sync"),
+        ("Study Plan", "Plan"),
     ]
     st.markdown(
-        "<div class='mobile-actions'>"
-        + "".join(
-            f"<div class='mobile-action'><b>{html.escape(label)}</b><span>{html.escape(sub)}</span></div>"
-            for _, label, sub in actions
-        )
-        + "</div>",
+        """<div class="section-title" style="margin-top:4px">
+        <div class="icon">Q</div><b>Quick actions</b></div>""",
         unsafe_allow_html=True,
     )
     cols = st.columns(4)
-    for col, (page, label, _) in zip(cols, actions):
+    for col, (page, label) in zip(cols, actions):
         if col.button(label, key=f"action-{page}", use_container_width=True):
             go_page(page)
 
@@ -1135,6 +1123,16 @@ def page_calendar() -> None:
                     st.session_state.calendar_selected_date = d
                     st.rerun()
         return
+    st.markdown(
+        f"""<div class="selected-day-note"><b>{selected:%A, %B %d}</b>
+        <div class="faint">Tap any day below to open that day's plan.</div></div>""",
+        unsafe_allow_html=True,
+    )
+    render_day_details(selected)
+    st.markdown(
+        """<div class="section-title"><div class="icon">M</div><b>Month grid</b></div>""",
+        unsafe_allow_html=True,
+    )
     render_clickable_month_grid(month_start, selected)
     st.markdown(
         f"<div class='faint' style='margin:2px 0 6px'>"
@@ -1142,16 +1140,15 @@ def page_calendar() -> None:
         f"<span style='color:{BRAND};font-size:15px'>●</span> study &nbsp;&nbsp;"
         f"<span style='color:{FIXED_DOT};font-size:15px'>●</span> class / work / club</div>",
         unsafe_allow_html=True)
-    last_day = calendar.monthrange(month_start.year, month_start.month)[1]
-    picked = st.date_input(
-        "Show a day's details", value=selected,
-        min_value=dt.date(month_start.year, month_start.month, 1),
-        max_value=dt.date(month_start.year, month_start.month, last_day))
-    if picked != selected:
-        st.session_state.calendar_selected_date = picked
-        st.rerun()
-    st.divider()
-    render_day_details(picked)
+    with st.expander("Jump to a date"):
+        last_day = calendar.monthrange(month_start.year, month_start.month)[1]
+        picked = st.date_input(
+            "Show a day's details", value=selected,
+            min_value=dt.date(month_start.year, month_start.month, 1),
+            max_value=dt.date(month_start.year, month_start.month, last_day))
+        if picked != selected:
+            st.session_state.calendar_selected_date = picked
+            st.rerun()
 
 
 COURSE_RE = re.compile(r"\b([A-Z]{2,4})\s?[- ]?(\d{2,3}[A-Z]?)\b")

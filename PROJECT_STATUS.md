@@ -41,8 +41,8 @@ again editable UTF-8 source and compiles successfully.
 - Warm off-white/teal/indigo theme in `.streamlit/config.toml`.
 - Polished dashboard stat cards and a quick-add assignment panel.
 - Compact phone-friendly month grid with persistent Agenda/Month view state,
-  visible due/study/fixed color legend, and tappable day buttons that open that
-  day's details.
+  visible due/study/fixed color legend, and tappable day buttons. Selected-day
+  details now appear above the grid immediately after tapping a date.
 - PWA manifest/icons for iPhone Home Screen install.
 - Safer testing launchers:
   - `Start Auto-Planner.bat` for computer-only local testing.
