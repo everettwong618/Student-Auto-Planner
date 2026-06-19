@@ -1370,7 +1370,7 @@ def page_import() -> None:
     if st.button("Open Calendar Sync", type="primary", use_container_width=True, key="import-open-calendar-sync"):
         go_page("Calendar Sync")
     found = None
-    t1, t2, t3, t4, t5 = st.tabs(["Paste text", "Upload .ics", "Connect feed", "Upload CSV", "Connected"])
+    t1, t2, t3, t4, t5 = st.tabs(["Paste text", "Upload .ics", "Calendar feed", "Upload CSV", "Connected feeds"])
     with t1:
         text = st.text_area("Paste syllabus text", height=160)
         if st.button("Detect due dates", use_container_width=True):
@@ -1385,6 +1385,7 @@ def page_import() -> None:
             except Exception as exc:
                 st.error(str(exc))
     with t3:
+        st.markdown("#### Calendar feed sync")
         st.caption("Use Canvas Calendar Feed, Google Calendar secret iCal URL, Outlook published ICS, or any webcal link.")
         feed_name = st.text_input("Feed name", placeholder="Canvas / School Calendar")
         url = st.text_input("Feed URL", placeholder="https://...ics or webcal://...")
@@ -1396,7 +1397,7 @@ def page_import() -> None:
                     st.warning("Feed loaded, but no dated events were found.")
             except Exception as exc:
                 st.error(f"Could not fetch that feed: {exc}")
-        if c2.button("Save and sync", type="primary", use_container_width=True):
+        if c2.button("Save and sync automatically", type="primary", use_container_width=True):
             if not url.strip():
                 st.warning("Paste a feed URL first.")
             else:
@@ -1416,6 +1417,22 @@ def page_import() -> None:
                     source["last_error"] = str(exc)
                     st.error(f"Saved the feed, but could not sync yet: {exc}")
                 st.rerun()
+        sources = st.session_state.get("feed_sources", [])
+        if sources:
+            st.markdown("##### Connected feeds")
+            if st.button("Refresh saved feeds", use_container_width=True, key="feed-tab-refresh"):
+                push_undo("refresh calendar feeds")
+                totals = refresh_connected_feeds(force=True)
+                st.toast(
+                    f"Feeds refreshed: {totals['added']} added, "
+                    f"{totals['updated']} updated, {totals['errors']} error(s)."
+                )
+                st.rerun()
+            for idx, source in enumerate(sources):
+                st.caption(
+                    f"{source.get('name', 'Calendar feed')} · "
+                    f"{source.get('last_count', 0)} events seen"
+                )
     with t4:
         csv = st.file_uploader("Upload CSV", type=["csv"])
         if csv:
@@ -1431,7 +1448,7 @@ def page_import() -> None:
         )
         sources = st.session_state.get("feed_sources", [])
         if not sources:
-            st.info("No connected feeds yet. Add one from the Connect feed tab.")
+            st.info("No connected feeds yet. Add one from the Calendar feed tab.")
         else:
             if st.button("Refresh all feeds now", type="primary", use_container_width=True):
                 push_undo("refresh calendar feeds")
