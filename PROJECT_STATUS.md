@@ -39,6 +39,8 @@ again editable UTF-8 source and compiles successfully.
   to connect calendar feeds.
 - Compact quick-nav strip for Today, Week, Calendar, Add, Sync, and Plan with
   URL-backed page links that work on mobile and desktop.
+- Add quick action opens directly to the assignment form, Calendar quick action
+  opens the month grid, and empty Dashboard users get clear Add/Import starts.
 - Larger touch targets and custom Inter-based styling.
 - Warm off-white/teal/indigo theme in `.streamlit/config.toml`.
 - Polished dashboard stat cards and a quick-add assignment panel.

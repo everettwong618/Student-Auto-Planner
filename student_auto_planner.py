@@ -683,6 +683,8 @@ def sync_page_from_query() -> None:
     page = st.query_params.get("page")
     if page in PAGES:
         st.session_state.active_page = page
+    if st.query_params.get("add") == "assignment":
+        st.session_state.show_add_assignment = True
 
 
 def render_action_bar() -> None:
@@ -704,6 +706,10 @@ def render_action_bar() -> None:
     for page, label, icon in actions:
         cls = "active" if page == active else ""
         href = f"?page={urllib.parse.quote(page)}"
+        if page == "Calendar":
+            href += "&cal_view=Month%20grid"
+        elif page == "Assignments":
+            href += "&add=assignment"
         links.append(
             f"<a class='{cls}' href='{href}' target='_self'>"
             f"<span class='nav-icon'>{html.escape(icon)}</span>"
@@ -956,6 +962,12 @@ def page_dashboard() -> None:
     if not st.session_state.assignments:
         st.markdown("""<div class="hero"><div class="k">Welcome</div><div class="b">Build your first plan</div><div class="s">Add an assignment or import a syllabus, and Auto-Planner will schedule the work.</div></div>""", unsafe_allow_html=True)
         st.info("No assignments yet.")
+        c1, c2 = st.columns(2)
+        if c1.button("Add first assignment", type="primary", use_container_width=True):
+            st.session_state.show_add_assignment = True
+            go_page("Assignments")
+        if c2.button("Import calendar or syllabus", use_container_width=True):
+            go_page("Import")
         return
     blocks = sorted([b for b in st.session_state.blocks if b.date == TODAY], key=lambda b: b.start)
     done = sum(1 for b in blocks if any(t.id == b.task_id and t.done for t in st.session_state.tasks))
@@ -1082,7 +1094,8 @@ def render_month_grid(month_start: dt.date, selected: dt.date) -> str:
                 dots += f"<span class='dot' style='background:{color}'></span>" * min(n, 4)
             cls = " ".join(c for c, on in (("today", d == TODAY), ("sel", d == selected)) if on)
             href = (
-                f"?cal_date={d.isoformat()}"
+                f"?page=Calendar"
+                f"&cal_date={d.isoformat()}"
                 f"&cal_view=Month%20grid"
                 f"&calendar_month_offset={month_offset_for(d)}"
             )
@@ -1097,6 +1110,9 @@ def page_calendar() -> None:
     st.markdown("### Calendar")
     if st.button("Connect calendars / sync feeds", use_container_width=True, key="calendar-open-sync"):
         go_page("Calendar Sync")
+    query_view = st.query_params.get("cal_view")
+    if query_view in ("Agenda", "Month grid"):
+        st.session_state.cal_view = query_view
     query_date = st.query_params.get("cal_date")
     if query_date:
         try:
@@ -1646,7 +1662,8 @@ def page_calendar_sync() -> None:
 
 def page_tasks() -> None:
     st.markdown("### Assignments")
-    with st.expander("Add an assignment"):
+    add_open = bool(st.session_state.pop("show_add_assignment", False))
+    with st.expander("Add an assignment", expanded=add_open):
         add_assignment_form("main")
     flt = st.segmented_control("Filter", ["Active", "All", "Done"], default="Active") if hasattr(st, "segmented_control") else st.radio("Filter", ["Active", "All", "Done"], horizontal=True)
     if not st.session_state.assignments:
