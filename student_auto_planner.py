@@ -980,6 +980,45 @@ def render_data_tools(auth: dict | None, prefix: str = "data") -> None:
             st.rerun()
 
 
+def render_schedule_setup(prefix: str = "setup") -> None:
+    with st.expander("Classes, work, and clubs"):
+        st.caption("These repeat every week. Add class twice if it meets Tuesday and Thursday.")
+        with st.form(f"{prefix}-fixed-form", clear_on_submit=True):
+            name = st.text_input("Name", placeholder="CHEM 101 Lecture", key=f"{prefix}-fixed-name")
+            kind = st.selectbox("Type", ["class", "work", "club"], key=f"{prefix}-fixed-kind")
+            day = st.selectbox("Day", DAYS, key=f"{prefix}-fixed-day")
+            a, b = st.columns(2)
+            start = a.number_input("Start", 6.0, 21.5, 10.0, 0.5, key=f"{prefix}-fixed-start")
+            end = b.number_input("End", 6.5, 22.0, 11.5, 0.5, key=f"{prefix}-fixed-end")
+            if st.form_submit_button("Add weekly commitment", use_container_width=True):
+                if name and end > start:
+                    push_undo("add commitment")
+                    st.session_state.fixed.append(Fixed(day, start, end, name, kind))
+                    generate_plan()
+                    st.rerun()
+                else:
+                    st.warning("Add a name and make sure end is after start.")
+        for idx, f in enumerate(st.session_state.fixed):
+            c1, c2 = st.columns([0.75, 0.25])
+            c1.caption(f"{f.day} {fmt_time(f.start)}-{fmt_time(f.end)} - {f.title}")
+            if c2.button("Remove", key=f"{prefix}-rmfixed-{idx}", use_container_width=True):
+                push_undo("remove commitment")
+                st.session_state.fixed.pop(idx)
+                generate_plan()
+                st.rerun()
+    with st.expander("Meal breaks"):
+        on = st.checkbox("Reserve meal times", value=st.session_state.meals_on, key=f"{prefix}-meals-on")
+        breakfast = st.slider("Breakfast", 6.0, 10.0, st.session_state.meals[0][0], 0.5, key=f"{prefix}-breakfast")
+        lunch = st.slider("Lunch", 11.0, 14.0, st.session_state.meals[1][0], 0.5, key=f"{prefix}-lunch")
+        dinner = st.slider("Dinner", 16.0, 20.0, st.session_state.meals[2][0], 0.5, key=f"{prefix}-dinner")
+        if (on, breakfast, lunch, dinner) != (st.session_state.meals_on, st.session_state.meals[0][0], st.session_state.meals[1][0], st.session_state.meals[2][0]):
+            push_undo("change meals")
+            st.session_state.meals_on = on
+            st.session_state.meals = [(breakfast, breakfast + .5, "Breakfast"), (lunch, lunch + 1, "Lunch"), (dinner, dinner + 1, "Dinner")]
+            generate_plan()
+            st.rerun()
+
+
 def sidebar() -> None:
     with st.sidebar:
         auth = st.session_state.get("auth")
@@ -1002,40 +1041,7 @@ def sidebar() -> None:
         add_assignment_form("side")
         st.divider()
         st.download_button("Export plan (.ics)", build_ics(), "auto-planner.ics", "text/calendar", use_container_width=True)
-        with st.expander("Classes, work, and clubs"):
-            st.caption("These repeat every week. Add class twice if it meets Tuesday and Thursday.")
-            with st.form("fixed_form", clear_on_submit=True):
-                name = st.text_input("Name", placeholder="CHEM 101 Lecture")
-                kind = st.selectbox("Type", ["class", "work", "club"])
-                day = st.selectbox("Day", DAYS)
-                a, b = st.columns(2)
-                start = a.number_input("Start", 6.0, 21.5, 10.0, 0.5)
-                end = b.number_input("End", 6.5, 22.0, 11.5, 0.5)
-                if st.form_submit_button("Add weekly commitment", use_container_width=True):
-                    if name and end > start:
-                        push_undo("add commitment")
-                        st.session_state.fixed.append(Fixed(day, start, end, name, kind))
-                        generate_plan()
-                        st.rerun()
-            for idx, f in enumerate(st.session_state.fixed):
-                c1, c2 = st.columns([0.75, 0.25])
-                c1.caption(f"{f.day} {fmt_time(f.start)}-{fmt_time(f.end)} - {f.title}")
-                if c2.button("Remove", key=f"rmfixed-{idx}", use_container_width=True):
-                    push_undo("remove commitment")
-                    st.session_state.fixed.pop(idx)
-                    generate_plan()
-                    st.rerun()
-        with st.expander("Meal breaks"):
-            on = st.checkbox("Reserve meal times", value=st.session_state.meals_on)
-            breakfast = st.slider("Breakfast", 6.0, 10.0, st.session_state.meals[0][0], 0.5)
-            lunch = st.slider("Lunch", 11.0, 14.0, st.session_state.meals[1][0], 0.5)
-            dinner = st.slider("Dinner", 16.0, 20.0, st.session_state.meals[2][0], 0.5)
-            if (on, breakfast, lunch, dinner) != (st.session_state.meals_on, st.session_state.meals[0][0], st.session_state.meals[1][0], st.session_state.meals[2][0]):
-                push_undo("change meals")
-                st.session_state.meals_on = on
-                st.session_state.meals = [(breakfast, breakfast + .5, "Breakfast"), (lunch, lunch + 1, "Lunch"), (dinner, dinner + 1, "Dinner")]
-                generate_plan()
-                st.rerun()
+        render_schedule_setup("side-schedule")
         st.divider()
         render_data_tools(auth, "side-data")
 
@@ -1125,6 +1131,8 @@ def page_schedule() -> None:
         else:
             color = KIND_COLORS.get(item.kind, TEXT)
             st.markdown(f"""<div class="card" style="border-left:5px solid {color}"><b>{html.escape(item.title)}</b><div class="faint">{KIND_LABELS.get(item.kind, item.kind)} - {fmt_time(item.start)}-{fmt_time(item.end)}</div></div>""", unsafe_allow_html=True)
+    st.markdown("""<div class="section-title"><div class="icon">S</div><b>Schedule settings</b></div>""", unsafe_allow_html=True)
+    render_schedule_setup("main-schedule")
 
 
 def calendar_items(day: dt.date) -> dict[str, list]:

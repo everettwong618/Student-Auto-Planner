@@ -20,6 +20,8 @@ again editable UTF-8 source and compiles successfully.
 - 30-day rolling auto-study plan.
 - 12-month Calendar page with Agenda and Month grid views.
 - Recurring weekly classes/work/clubs in the sidebar.
+- Recurring classes/work/clubs and meal-break controls are also available from
+  the Schedule page, so mobile users can manage them without opening the sidebar.
 - Assignment status tracking: Not Started, In Progress, Done.
 - Persisted completed task IDs so progress survives replans and saves.
 - Single-level undo for common edits, deletes, imports, clears, and schedule changes.
