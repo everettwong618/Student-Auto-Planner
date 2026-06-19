@@ -148,6 +148,12 @@ def inject_ui() -> None:
         .study-card.done {text-decoration:line-through;opacity:.58;}
         .study-title {border-left:4px solid var(--task-color,#01696f);padding-left:8px;font-weight:800;color:#28251d;}
         .study-meta {display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px;}
+        .assignment-card {background:white;border:1px solid rgba(40,37,29,.08);border-radius:12px;padding:14px 16px;margin:10px 0;box-shadow:0 6px 18px rgba(40,37,29,.07);}
+        .assignment-head {display:flex;justify-content:space-between;gap:10px;align-items:flex-start;}
+        .assignment-title {font-weight:800;color:#28251d;line-height:1.25;}
+        .assignment-badges {display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;}
+        .mini-progress {height:7px;background:#eeeae2;border-radius:999px;overflow:hidden;margin-top:10px;}
+        .mini-progress span {display:block;height:100%;background:linear-gradient(90deg,#01696f,#4157c8);border-radius:999px;}
         .quick-nav {display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin:8px 0 16px;}
         .quick-nav a {background:white;border:1px solid rgba(40,37,29,.08);border-radius:12px;min-height:52px;padding:8px 6px;text-align:center;box-shadow:0 4px 12px rgba(40,37,29,.05);text-decoration:none;color:#28251d;display:flex;flex-direction:column;align-items:center;justify-content:center;}
         .quick-nav a.active {background:#e7f4ee;border-color:rgba(1,105,111,.28);box-shadow:0 6px 18px rgba(1,105,111,.10);}
@@ -183,6 +189,9 @@ def inject_ui() -> None:
           .hero .b {font-size:24px;}
           .card {padding:13px 14px;}
           .study-card {padding:11px 12px;}
+          .assignment-card {padding:13px 14px;}
+          .assignment-head {display:block;}
+          .assignment-badges {justify-content:flex-start;margin-top:8px;}
           .quick-nav {grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;}
           .quick-nav a {min-height:48px;border-radius:11px;padding:7px 5px;}
           .stat-grid {grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
@@ -818,6 +827,41 @@ def render_overload_banner() -> None:
         st.markdown(f"""<div class="danger-banner"><b>{len(over)} assignment(s) do not fit before the deadline.</b><div class="muted">Affected: {html.escape(shown)}. Free up time, reduce estimated hours, or start now.</div></div>""", unsafe_allow_html=True)
 
 
+def due_text(days: int) -> str:
+    if days < 0:
+        return f"{abs(days)}d overdue"
+    if days == 0:
+        return "due today"
+    if days == 1:
+        return "due tomorrow"
+    return f"due in {days}d"
+
+
+def render_assignment_card(a: Assignment, score: int | None = None, compact: bool = False) -> None:
+    tasks = assignment_tasks(a.id)
+    done = sum(t.done for t in tasks)
+    total = len(tasks)
+    pct = round(done / total * 100) if total else 0
+    days = (a.due - TODAY).days
+    cls, lbl = ("hi", "Overdue") if days < 0 else pri_label(score if score is not None else priority_score(a))
+    status = assignment_status(a)
+    progress = "" if compact else f"<div class='mini-progress'><span style='width:{pct}%'></span></div>"
+    st.markdown(
+        f"""<div class="assignment-card">
+        <div class="assignment-head">
+          <div>
+            <div class="assignment-title">{html.escape(a.title)}</div>
+            <div class="faint">{html.escape(a.course)} - {due_text(days)} - {done}/{total} tasks</div>
+          </div>
+          <div class="assignment-badges">
+            <span class="pill {cls}">{lbl}</span>
+            <span class="pill {status_class(status)}">{status}</span>
+          </div>
+        </div>{progress}</div>""",
+        unsafe_allow_html=True,
+    )
+
+
 def render_block(b: Block, today_view: bool = False) -> None:
     task = next((t for t in st.session_state.tasks if t.id == b.task_id), None)
     if not task:
@@ -1016,10 +1060,7 @@ def page_dashboard() -> None:
     with right:
         st.markdown("#### Upcoming")
         for a in sorted(st.session_state.assignments, key=lambda a: a.due)[:7]:
-            days = (a.due - TODAY).days
-            cls, lbl = ("hi", "Overdue") if days < 0 else pri_label(priority_score(a))
-            when = "today" if days == 0 else "tomorrow" if days == 1 else f"in {days}d"
-            st.markdown(f"""<div class="card"><b>{html.escape(a.title)}</b><span class="pill {cls}" style="float:right">{lbl}</span><div class="faint">{html.escape(a.course)} - due {when}</div><span class="pill {status_class(assignment_status(a))}">{assignment_status(a)}</span></div>""", unsafe_allow_html=True)
+            render_assignment_card(a, priority_score(a), compact=True)
 
 
 def page_schedule() -> None:
@@ -1690,11 +1731,8 @@ def page_tasks() -> None:
         visible = tasks if flt == "All" else [t for t in tasks if t.done] if flt == "Done" else [t for t in tasks if not t.done]
         if not visible and flt != "All":
             continue
-        days = (a.due - TODAY).days
-        cls, lbl = ("hi", "Overdue") if days < 0 else pri_label(score[a.id])
         status = assignment_status(a)
-        done = sum(t.done for t in tasks)
-        st.markdown(f"""<div class="card"><div style="display:flex;justify-content:space-between;gap:10px"><div><b>{html.escape(a.title)}</b><div class="faint">{html.escape(a.course)} - due {a.due:%b %d} - {done}/{len(tasks)} tasks</div></div><div><span class="pill {cls}">{lbl}</span> <span class="pill {status_class(status)}">{status}</span></div></div></div>""", unsafe_allow_html=True)
+        render_assignment_card(a, score[a.id])
         c1, c2 = st.columns([.7, .3])
         new_status = c1.selectbox("Status", STATUSES, index=STATUSES.index(status), key=f"status-{a.id}", label_visibility="collapsed")
         if new_status != status:
