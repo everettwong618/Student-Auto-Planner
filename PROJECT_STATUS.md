@@ -24,6 +24,8 @@ again editable UTF-8 source and compiles successfully.
   the Schedule page, so mobile users can manage them without opening the sidebar.
 - Assignment status tracking: Not Started, In Progress, Done.
 - Assignments page supports sorting by Priority, Due date, Course, or Status.
+- Assignments page includes search across title, course, status, and detected
+  assignment type, with a friendly empty state for no matches.
 - Persisted completed task IDs so progress survives replans and saves.
 - Single-level undo for common edits, deletes, imports, clears, and schedule changes.
 - Account page exposes data download/restore/undo/backup tools so mobile users

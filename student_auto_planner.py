@@ -287,70 +287,63 @@ def store_auth_response(response, fallback_email: str) -> bool:
     return True
 
 
-# --- Stay signed in across a browser refresh: remember the refresh token in a
-#     cookie and restore the Supabase session on load. All guarded so a failure
-#     just falls back to the normal login screen; guests are never affected. ---
-try:
-    import extra_streamlit_components as stx
-except Exception:  # pragma: no cover - component optional
-    stx = None
-
+# --- Stay signed in across a browser refresh ---
+#  Reliable approach: READ the cookie server-side via st.context.cookies (no
+#  iframe, no async race) and WRITE/CLEAR it as a first-party cookie on the
+#  top-level document via JS (works on Safari, unlike iframe-component cookies).
 AUTH_COOKIE = "ap_refresh"
 
 
-def _cookies():
-    if stx is None:
-        return None
-    if "cookie_mgr" not in st.session_state:
-        try:
-            st.session_state.cookie_mgr = stx.CookieManager(key="ap_cookies")
-        except Exception:
-            st.session_state.cookie_mgr = None
-    return st.session_state.cookie_mgr
+def _set_cookie_js(value: str, max_age: int) -> None:
+    payload = json.dumps(value)
+    st.html(
+        f"""<script>
+        try {{
+          window.parent.document.cookie = "{AUTH_COOKIE}=" +
+            encodeURIComponent({payload}) +
+            "; path=/; max-age={max_age}; SameSite=Lax; Secure";
+        }} catch (e) {{}}
+        </script>""",
+        unsafe_allow_javascript=True,
+    )
 
 
-def remember_session() -> None:
-    cm = _cookies()
-    token = (st.session_state.get("auth") or {}).get("refresh_token")
-    if not cm or not token:
-        return
+def read_auth_cookie() -> str | None:
     try:
-        cm.set(AUTH_COOKIE, token,
-               expires_at=dt.datetime.now() + dt.timedelta(days=30), key="ap_cookie_set")
+        raw = st.context.cookies.get(AUTH_COOKIE)
     except Exception:
-        pass
+        raw = None
+    return urllib.parse.unquote(raw) if raw else None
 
 
-def forget_session() -> None:
-    cm = _cookies()
-    if not cm:
+def sync_auth_cookie() -> None:
+    """Write the refresh-token cookie during a normal render, once per login."""
+    auth = st.session_state.get("auth")
+    if not auth or not auth.get("refresh_token"):
         return
-    try:
-        cm.delete(AUTH_COOKIE, key="ap_cookie_del")
-    except Exception:
-        pass
+    if st.session_state.get("_cookie_written") == auth["refresh_token"]:
+        return
+    _set_cookie_js(auth["refresh_token"], 60 * 60 * 24 * 30)
+    st.session_state._cookie_written = auth["refresh_token"]
+
+
+def clear_auth_cookie() -> None:
+    _set_cookie_js("", 0)
 
 
 def try_restore_session() -> None:
     if st.session_state.get("auth") or st.session_state.get("guest") or not supabase_ready():
         return
-    cm = _cookies()
-    if not cm:
-        return
-    try:
-        token = cm.get(AUTH_COOKIE)
-    except Exception:
-        token = None
+    token = read_auth_cookie()
     if not token:
         return
     try:
         if store_auth_response(get_sb().auth.refresh_session(token), ""):
-            remember_session()
             st.rerun()
         else:
-            forget_session()
+            clear_auth_cookie()
     except Exception:
-        forget_session()
+        clear_auth_cookie()
 
 
 def sign_in(email: str, password: str) -> bool:
@@ -362,7 +355,6 @@ def sign_up(email: str, password: str) -> bool:
 
 
 def sign_out() -> None:
-    forget_session()
     try:
         if "sb" in st.session_state:
             st.session_state.sb.auth.sign_out()
@@ -370,6 +362,7 @@ def sign_out() -> None:
         pass
     for key in list(st.session_state.keys()):
         del st.session_state[key]
+    st.session_state._just_logged_out = True   # clear the cookie on next render
 
 
 def send_password_reset(email: str) -> None:
@@ -725,21 +718,18 @@ def render_action_bar() -> None:
         <div class="icon">Q</div><b>Quick actions</b></div>""",
         unsafe_allow_html=True,
     )
-    links = []
+    # In-app navigation (st.rerun, NOT page-reloading anchors) so clicking a
+    # quick action never drops the session / bounces you to the login screen.
     active = st.session_state.get("active_page", "Dashboard")
-    for page, label, icon in actions:
-        cls = "active" if page == active else ""
-        href = f"?page={urllib.parse.quote(page)}"
-        if page == "Calendar":
-            href += "&cal_view=Month%20grid"
-        elif page == "Assignments":
-            href += "&add=assignment"
-        links.append(
-            f"<a class='{cls}' href='{href}' target='_self'>"
-            f"<span class='nav-icon'>{html.escape(icon)}</span>"
-            f"<b>{html.escape(label)}</b></a>"
-        )
-    st.markdown(f"<div class='quick-nav'>{''.join(links)}</div>", unsafe_allow_html=True)
+    cols = st.columns(3)
+    for i, (page, label, icon) in enumerate(actions):
+        if cols[i % 3].button(label, key=f"qa-{page}", use_container_width=True,
+                              type="primary" if page == active else "secondary"):
+            if page == "Calendar":
+                st.session_state.cal_view = "Month grid"
+            if page == "Assignments":
+                st.session_state.show_add_assignment = True
+            go_page(page)
 
 
 def page_header(title: str, subtitle: str, eyebrow: str = "Auto-Planner") -> None:
@@ -766,7 +756,6 @@ def login_gate() -> None:
         if st.button("Log in", type="primary", use_container_width=True, disabled=not supabase_ready()):
             try:
                 if sign_in(email, password):
-                    remember_session()
                     st.rerun()
             except Exception as exc:
                 st.error(f"Could not log in: {exc}")
@@ -778,7 +767,6 @@ def login_gate() -> None:
                 if len(password) < 6:
                     st.warning("Use at least 6 characters.")
                 elif sign_up(email, password):
-                    remember_session()
                     st.rerun()
                 else:
                     st.info("Check your email to confirm the account, then log in.")
@@ -800,8 +788,12 @@ def login_gate() -> None:
     st.stop()
 
 
-try_restore_session()
+if st.session_state.pop("_just_logged_out", False):
+    clear_auth_cookie()          # remove the cookie during this (login-screen) render
+else:
+    try_restore_session()        # restore from cookie on a fresh load / refresh
 login_gate()
+sync_auth_cookie()               # persist the cookie for signed-in users
 init_state()
 
 
@@ -1217,15 +1209,9 @@ def render_month_grid(month_start: dt.date, selected: dt.date) -> str:
                              (FIXED_DOT, len(items["fixed"]))):
                 dots += f"<span class='dot' style='background:{color}'></span>" * min(n, 4)
             cls = " ".join(c for c, on in (("today", d == TODAY), ("sel", d == selected)) if on)
-            href = (
-                f"?page=Calendar"
-                f"&cal_date={d.isoformat()}"
-                f"&cal_view=Month%20grid"
-                f"&calendar_month_offset={month_offset_for(d)}"
-            )
-            cells += (f"<td class='{cls}'><a class='day-link' href='{href}' target='_self'>"
+            cells += (f"<td class='{cls}'>"
                       f"<div class='dnum'>{num}</div>"
-                      f"<div class='dots'>{dots}</div></a></td>")
+                      f"<div class='dots'>{dots}</div></td>")
         rows += f"<tr>{cells}</tr>"
     return f"<table class='cal'><thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table>"
 
@@ -1291,7 +1277,7 @@ def page_calendar() -> None:
         return
     st.markdown(
         f"""<div class="selected-day-note"><b>{selected:%A, %B %d}</b>
-        <div class="faint">Tap any day below to open that day's plan.</div></div>""",
+        <div class="faint">Use "Jump to a date" below to open another day's plan.</div></div>""",
         unsafe_allow_html=True,
     )
     render_day_details(selected)
@@ -1789,6 +1775,7 @@ def page_tasks() -> None:
     add_open = bool(st.session_state.pop("show_add_assignment", False))
     with st.expander("Add an assignment", expanded=add_open):
         add_assignment_form("main")
+    search = st.text_input("Search assignments", placeholder="Course, title, or status", key="assignment-search")
     flt_col, sort_col = st.columns([0.58, 0.42])
     with flt_col:
         flt = st.segmented_control("Filter", ["Active", "All", "Done"], default="Active") if hasattr(st, "segmented_control") else st.radio("Filter", ["Active", "All", "Done"], horizontal=True)
@@ -1807,11 +1794,23 @@ def page_tasks() -> None:
         if sort_by == "Status":
             return (status_rank.get(assignment_status(a), 9), a.due, -score[a.id])
         return (-score[a.id], a.due, a.title.lower())
-    for a in sorted(st.session_state.assignments, key=assignment_sort_key):
+    query = search.strip().lower()
+    visible_assignments = st.session_state.assignments
+    if query:
+        visible_assignments = [
+            a for a in visible_assignments
+            if query in a.title.lower()
+            or query in a.course.lower()
+            or query in assignment_status(a).lower()
+            or query in detect_type(a.title, a.course)
+        ]
+    shown_count = 0
+    for a in sorted(visible_assignments, key=assignment_sort_key):
         tasks = assignment_tasks(a.id)
         visible = tasks if flt == "All" else [t for t in tasks if t.done] if flt == "Done" else [t for t in tasks if not t.done]
         if not visible and flt != "All":
             continue
+        shown_count += 1
         status = assignment_status(a)
         render_assignment_card(a, score[a.id])
         c1, c2 = st.columns([.7, .3])
@@ -1857,6 +1856,8 @@ def page_tasks() -> None:
                 set_task_done(t, checked)
                 st.session_state.history[-1] = max(0, st.session_state.history[-1] + (.3 if checked else -.3))
                 st.rerun()
+    if shown_count == 0:
+        st.markdown("""<div class="empty-note">No assignments match this view.</div>""", unsafe_allow_html=True)
 
 
 def page_plan() -> None:
